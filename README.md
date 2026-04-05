@@ -4,7 +4,7 @@
 
 A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for configuring and launching the tool without touching the command line.
 
-> Inspired by [WIM Witch](https://github.com/mchave3/WimWitch) by Donna Ryan.
+> Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 
 ---
 
