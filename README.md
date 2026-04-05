@@ -127,5 +127,5 @@ See [LICENSE](LICENSE) for the full text.
 
 ## Author
 
-**Mathias Haas** — Nobina IT  
+**Mathias Haas**
 For urgent matters: `bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ==` *(base64)*
