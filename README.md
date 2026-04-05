@@ -2,7 +2,7 @@
 
 **WimWizard** is a PowerShell-based Windows 11 WIM image servicing tool developed for enterprise IT environments. It automates the monthly process of building and maintaining deployment-ready WIM images — injecting language packs, removing unwanted built-in apps, and applying the latest Patch Tuesday updates — all in a single automated run.
 
-A graphical launcher (`WimWizard-GUI.ps1`) provides a clean dark-themed Windows Forms interface for configuring and launching the tool without touching the command line.
+A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for configuring and launching the tool without touching the command line.
 
 > Inspired by [WIM Witch](https://github.com/mchave3/WimWitch) by Donna Ryan.
 
