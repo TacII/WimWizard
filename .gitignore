@@ -25,9 +25,6 @@ Output/
 ISO-Source/
 *.iso
 
-# Test script (not part of release)
-WimWizard-TEST.ps1
-
 # PowerShell session files
 *.pssc
 *.psd1.bak
