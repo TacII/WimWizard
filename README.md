@@ -6,6 +6,9 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 
 > Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 
+
+<img width="764" height="611" alt="image" src="https://github.com/user-attachments/assets/e07dddcd-05d5-4eeb-8641-e74ccafb10ee" />
+
 ---
 
 ## Features
