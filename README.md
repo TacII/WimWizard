@@ -35,7 +35,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 - Windows 11 Language Pack ISO (contains all LP + FOD packages — no separate FOD ISO needed)
 - Administrator rights (the GUI launches the main script elevated automatically)
 - Internet access for automatic update download (or provide updates manually via `-UpdatePath`)
-- [MSCatalogLTS](https://github.com/AshleyHow/MSCatalogLTS) PowerShell module (installed automatically if missing)
+- [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5) PowerShell module (installed automatically if missing)
 
 ---
 
