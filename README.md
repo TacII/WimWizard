@@ -70,7 +70,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 6. Import the finished WIM into SCCM/MECM:  
    `Software Library → Operating System Images → right-click → Update Distribution Points`
 
-7. If you are building images often you may really want to exclude <driveletter>\WimWizard\Output from Microsoft Defender virusscanning.
+7. If you are building images often you may want to exclude <driveletter>\WimWizard\Output from Microsoft Defender virus scanning.
    Otherwise DISM will take twice as long to close the image.
 
 ---
