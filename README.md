@@ -16,7 +16,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 - **Full image build** — Services a Windows 11 Enterprise WIM from a source ISO: language packs, FOD packages, cumulative updates (.NET, SafeOS/WinRE), and Appx removal
 - **Inbox app language fix** — Automatically generates and injects a RunOnce script into the Default User profile that reinstalls kept apps via winget at first user logon. This triggers the AppX framework to download the correct language satellites for the user's locale — no task sequence steps required
 - **Patch mode** — Patches an existing serviced WIM with the latest updates only, skipping ISO/LP steps. Ideal for monthly Patch Tuesday cycles
-- **Automatic update download** — Downloads LCU, .NET and SafeOS updates directly from the Microsoft Update Catalog via [MSCatalogLTS](https://github.com/AshleyHow/MSCatalogLTS). Already-downloaded KBs are reused automatically
+- **Automatic update download** — Downloads LCU, .NET and SafeOS updates directly from the Microsoft Update Catalog via [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5). Already-downloaded KBs are reused automatically
 - **Language pack injection** — Supports all 39 languages available in the Microsoft LP ISO, including LIPs and FOD packages
 - **Appx removal** — 36 configurable inbox apps with sensible corporate defaults. Fully configurable via GUI
 - **WinRE patching** — Applies SSU + SafeOS updates to WinRE following the Microsoft documented sequence
