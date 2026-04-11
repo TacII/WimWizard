@@ -49,6 +49,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 | `ISO-Source\` | Place your Windows ISO and Language Pack ISO here |
 | `Updates\` | Cached update files — reused automatically on subsequent runs |
 | `Output\` | Default output folder for finished WIM files and build logs |
+| `SetLanguage.zip\` | Task sequence steps to set default language for the nordic languages based on input from TSGui or UDI-Wizard |
 
 ---
 
