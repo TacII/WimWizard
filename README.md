@@ -33,7 +33,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 - Windows PowerShell 5.1 or later
 - Windows 11 Enterprise or Education source ISO (25H2 or later)
 - Windows 11 Language Pack ISO (contains all LP + FOD packages — no separate FOD ISO needed)
-- Administrator rights (the GUI launches the main script elevated automatically)
+- Administrator rights, both scripts need to be launched as Admin. (Mount command requires Admin-rights.)
 - Internet access for automatic update download (or provide updates manually via `-UpdatePath`)
 - [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5) PowerShell module (installed automatically if missing)
 
@@ -63,7 +63,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 
 3. Place both ISOs in the `ISO-Source\` folder next to the scripts
 
-4. Right-click `WimWizard-GUI.ps1` → **Run with PowerShell**  
+4. Right-click `WimWizard-GUI.ps1` → **Run As Admin**  
    *(or launch from an elevated PowerShell session)*
 
 5. Select your languages, configure app removal, click **Run**
