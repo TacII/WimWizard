@@ -1,15 +1,17 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    WIM Wizard - Windows 11 Image Servicing Tool for SCCM/MECM  v4.2
+    WIM Wizard - Windows 11 Image Servicing Tool for SCCM/MECM  v4.9
 
 .DESCRIPTION
     Services a Windows 11 25H2/24H2 WIM file for distribution via SCCM/MECM.
 
     The user only needs to point to ONE folder containing the downloaded ISOs.
+    Supports both x64 and ARM64 builds. The folder can contain all four ISOs
+    at once; the correct ones are selected by architecture automatically.
     The script automatically:
-      - Finds and mounts the Windows ISO, extracts install.wim
-      - Finds and mounts the Language Pack ISO (which also contains all FOD packages)
+      - Finds and mounts the correct Windows ISO (x64 or ARM64)
+      - Finds and mounts the matching Language Pack ISO (also contains FOD packages)
         and searches the LanguagesAndOptionalFeatures subfolder for all cab files
       - Auto-selects the Enterprise edition (or asks if not found)
       - Downloads the latest Patch Tuesday updates from Microsoft Update Catalog
@@ -18,9 +20,9 @@
       - Exports and compresses the finished WIM
 
 .PARAMETER SourceFolder
-    Folder containing the two ISOs downloaded from Microsoft:
-      - Windows 11 Enterprise 25H2 ISO
-      - Language Pack ISO (also contains all FOD packages)
+    Folder containing the ISOs downloaded from Microsoft.
+    Can contain up to four ISOs (x64 Windows, ARM64 Windows, x64 LP, ARM64 LP).
+    The correct ISO pair is selected automatically based on -X64 / -ARM64.
     Default: <ScriptFolder>\ISO-Source
 
 .PARAMETER UpdatePath
@@ -69,58 +71,26 @@
     License  : GNU General Public License v3.0 (GPL-3.0)
                https://www.gnu.org/licenses/gpl-3.0.html
     Product     : WIM Wizard (tribute to WIM Witch by Donna Ryan)
-    Version     : 4.6.0
+    Version     : 4.9.0
     Date        : 2026-04-01
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x)
 
     CHANGELOG
-    1.0.0  Initial release.
-    1.1.0  Automatic update download from Microsoft Update Catalog.
-    1.2.0  Translated all user-facing text and comments to English.
-    1.3.0  Added direct Microsoft 365 Admin Center download link for Enterprise ISO.
-    2.0.0  Single source folder, auto ISO discovery/mounting. Auto-selects Enterprise
-           edition. -SourceFolder replaces -ISOPath / -LPPath / -FODPath.
-    2.2.0  ISO auto-detection rewritten for actual Microsoft naming conventions.
-           LP matched by 'LangPack', OS ISO by 'Win_Pro_11'.
-    2.3.0  LP ISO contains both LP and FOD cabs - removed separate FOD ISO assumption.
-           System FODs installed as language-tagged variants per language.
-    2.4.0  Proper WinRE patching per Microsoft documented sequence: winre.wim
-           extracted, mounted, patched with LCU + SafeOS, exported, written back.
-    2.5.0  Persistent update cache in Updates\ folder keyed by KB number.
-    2.6.0  All paths now derived from $PSScriptRoot - works on any drive letter.
-    2.7.0  Update Catalog search terms derived dynamically from WIM build number.
-    2.7.1  Fixed PropertyNotFoundException - Get-WindowsImage needs -Index for Version.
-    2.7.2  Added TLS 1.2 and User-Agent to all Catalog requests.
-    2.8.0  Replaced custom Catalog HTML scraping with MSCatalogLTS module.
-    2.9.0  Fixed SafeOS search term. Removed neutral FOD crash (0x800f081e).
-           Fixed ISO dismount on all exit paths (trap + Exit-Script helper).
-    3.0.0  Fixed G:: double colon. Added -SetDefaultLanguage switch (off by default).
-           Fixed LCU disk-full (0x80070070) with -ScratchDirectory on all DISM calls.
-    3.1.0  SafeOS auto-download removed - MSCatalogLTS cannot find Dynamic Update
-           packages. Script checks cache and shows manual instructions if missing.
-    3.2.0  Added DISM component cleanup before dismount to reduce save time.
-           Added -ScratchDirectory to Dismount-WindowsImage and Export-WindowsImage.
-    3.2.1  Fixed stale version (2.0.0) in .SYNOPSIS and wrong filename reference.
-    3.3.0  -Unattended fully wired up - Read-PathWithDefault uses defaults silently.
-    3.4.0  Checkpoint cumulative update support: LCU applied from isolated temp
-           folder so DISM auto-discovers prerequisites without .NET interference.
-    3.5.0  Checkpoint prerequisites downloaded automatically via -DownloadAll.
-           SafeOS now tries -IncludeDynamic short-term search before manual fallback.
-    3.6.0  Fixed SafeOS auto-download using short-term search with -IncludeDynamic.
-    3.6.1  Fixed "No LCU files found" - Get-ChildItem -Include silently ignores
-           filter without -Recurse. Replaced with two separate -Filter calls.
-    3.7.0  Fixed .Count crash under StrictMode (single Where-Object result).
-           Output filename auto-generated from WIM build, version, languages, date.
-    3.7.1  Fixed LCU 0x80073712 on cache hit: checkpoint prerequisite now fetched
-           via -DownloadAll when no 0_Checkpoint_*.msu exists in Updates folder.
-    3.8.0  Fixed empty KB number in checkpoint filename - MSCatalogLTS downloads
-           with lowercase 'kb'; regex now case-insensitive with .ToUpper().
-           WinRE LCU now uses same isolated-folder approach as main OS.
-    3.8.1  Added -Optimize to Mount-WindowsImage calls.
-    3.8.2  Removed -Optimize from main OS mount (cross-drive file access errors
-           when adding language pack cabs from mounted ISO on separate drive).
-    3.8.3  Removed -Optimize from WinRE mount - same issue as main OS mount.
+    4.9.0  ARM64 support. -X64 and -ARM64 switch parameters (default x64).
+           Resolve-SourceFolder picks ISO matching requested architecture based
+           on 'arm64' in filename - applies to both Windows ISO and LP ISO.
+           Both x64 and ARM64 LP ISOs are supported (LP ISO has same arch filter
+           as Windows ISO). Catalog search terms, update cache filenames, and
+           LP/FOD cab search patterns are all architecture-aware.
+           GUI: architecture radio toggle, LP ISO indicator validates correct
+           arch LP ISO, elevation warning if not running as Administrator.
+    4.8.0  Font pack injection for languages that require supplemental fonts
+           (Arabic, Hebrew, Japanese, Korean, Thai, Chinese Simplified/Traditional).
+           Font packs are auto-detected from LP ISO and injected once per font tag.
+           zh-HK support: uses zh-TW LP as display language base, plus zh-HK specific
+           FODs (Handwriting, OCR, TextToSpeech) injected in a supplemental pass.
+           Fixed Japanese: added 'ja' as primary LocaleMap key (was 'jp' only).
     4.7.0  RunOnce language localization fix. After Appx removal, generates
            InstallSystemApps.ps1 containing winget reinstall commands for all
            apps that were KEPT in the image (not in removal list). Copies
@@ -155,7 +125,8 @@
            bg-BG, et-EE, eu-ES, gl-ES, hr-HR, lt-LT, lv-LV, ru-RU, sl-SI,
            sr-Latn-RS, uk-UA, vi-VN. Added country-code aliases (dk->da-DK,
            sv->sv-SE, gb->en-GB etc). Fixed LP cab filename search pattern:
-           actual filename is "Language-Pack_x64_sv-se.cab" not "Language-Pack.*".
+           actual filename is "Language-Pack_x64_sv-se.cab" (x64) or
+           "Language-Pack_arm64_sv-se.cab" (ARM64). FODs use "~amd64~" or "~arm64~".
     4.1.3  Fixed $ResolvedLocales always empty: Resolve-LanguageCodes used
            $Input as parameter name which is a reserved PowerShell automatic
            variable (current pipeline object). Renamed to $CodeString.
@@ -181,6 +152,52 @@
            Unknown codes show supported list and exit cleanly.
            Output filename uses country codes: Win11_25H2_..._se_no_dk_fi_....wim
            LCU progress message added so users know the script has not hung.
+    3.8.3  Removed -Optimize from WinRE mount - same issue as main OS mount.
+    3.8.2  Removed -Optimize from main OS mount (cross-drive file access errors
+           when adding language pack cabs from mounted ISO on separate drive).
+    3.8.1  Added -Optimize to Mount-WindowsImage calls.
+    3.8.0  Fixed empty KB number in checkpoint filename - MSCatalogLTS downloads
+           with lowercase 'kb'; regex now case-insensitive with .ToUpper().
+           WinRE LCU now uses same isolated-folder approach as main OS.
+    3.7.1  Fixed LCU 0x80073712 on cache hit: checkpoint prerequisite now fetched
+           via -DownloadAll when no 0_Checkpoint_*.msu exists in Updates folder.
+    3.7.0  Fixed .Count crash under StrictMode (single Where-Object result).
+           Output filename auto-generated from WIM build, version, languages, date.
+    3.6.1  Fixed "No LCU files found" - Get-ChildItem -Include silently ignores
+           filter without -Recurse. Replaced with two separate -Filter calls.
+    3.6.0  Fixed SafeOS auto-download using short-term search with -IncludeDynamic.
+    3.5.0  Checkpoint prerequisites downloaded automatically via -DownloadAll.
+           SafeOS now tries -IncludeDynamic short-term search before manual fallback.
+    3.4.0  Checkpoint cumulative update support: LCU applied from isolated temp
+           folder so DISM auto-discovers prerequisites without .NET interference.
+    3.3.0  -Unattended fully wired up - Read-PathWithDefault uses defaults silently.
+    3.2.1  Fixed stale version (2.0.0) in .SYNOPSIS and wrong filename reference.
+    3.2.0  Added DISM component cleanup before dismount to reduce save time.
+           Added -ScratchDirectory to Dismount-WindowsImage and Export-WindowsImage.
+    3.1.0  SafeOS auto-download removed - MSCatalogLTS cannot find Dynamic Update
+           packages. Script checks cache and shows manual instructions if missing.
+    3.0.0  Fixed G:: double colon. Added -SetDefaultLanguage switch (off by default).
+           Fixed LCU disk-full (0x80070070) with -ScratchDirectory on all DISM calls.
+    2.9.0  Fixed SafeOS search term. Removed neutral FOD crash (0x800f081e).
+           Fixed ISO dismount on all exit paths (trap + Exit-Script helper).
+    2.8.0  Replaced custom Catalog HTML scraping with MSCatalogLTS module.
+    2.7.2  Added TLS 1.2 and User-Agent to all Catalog requests.
+    2.7.1  Fixed PropertyNotFoundException - Get-WindowsImage needs -Index for Version.
+    2.7.0  Update Catalog search terms derived dynamically from WIM build number.
+    2.6.0  All paths now derived from $PSScriptRoot - works on any drive letter.
+    2.5.0  Persistent update cache in Updates\ folder keyed by KB number.
+    2.4.0  Proper WinRE patching per Microsoft documented sequence: winre.wim
+           extracted, mounted, patched with LCU + SafeOS, exported, written back.
+    2.3.0  LP ISO contains both LP and FOD cabs - removed separate FOD ISO assumption.
+           System FODs installed as language-tagged variants per language.
+    2.2.0  ISO auto-detection rewritten for actual Microsoft naming conventions.
+           LP matched by 'LangPack', OS ISO by 'Win_Pro_11'.
+    2.0.0  Single source folder, auto ISO discovery/mounting. Auto-selects Enterprise
+           edition. -SourceFolder replaces -ISOPath / -LPPath / -FODPath.
+    1.3.0  Added direct Microsoft 365 Admin Center download link for Enterprise ISO.
+    1.2.0  Translated all user-facing text and comments to English.
+    1.1.0  Automatic update download from Microsoft Update Catalog.
+    1.0.0  Initial release.
 
 .LINK
     https://admin.microsoft.com/adminportal/home#/subscriptions/vlnew/downloadsandkeys (Enterprise ISO + LP + FOD)
@@ -206,12 +223,17 @@ param(
     [string]$PatchExistingWim = "",         # Path to existing serviced WIM to patch (updates only).
                                             # When set: skips ISO discovery, LP injection, Appx removal.
                                             # Languages and build info are read from the WIM itself.
+    [switch]$X64,                         # Build x64 image (default when neither switch set)
+    [switch]$ARM64,                        # Build ARM64 image
     [switch]$Unattended
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "4.7.0"
+$ScriptVersion = "4.9.0"
+
+# Resolve architecture - ARM64 wins if both somehow set; default x64
+$Architecture = if ($ARM64) { "arm64" } else { "x64" }
 
 if ($Help) {
     Write-Host ""
@@ -282,7 +304,8 @@ $LocaleMap = @{
     'hu' = @('hu-HU')
     'il' = @('he-IL')
     'it' = @('it-IT')
-    'jp' = @('ja-JP')
+    'ja' = @('ja-JP')   # Japanese (ISO 639-1)
+    'jp' = @('ja-JP')   # Japanese (country code alias)
     'ko' = @('ko-KR')
     'kr' = @('ko-KR')
     'lt' = @('lt-LT')
@@ -302,6 +325,7 @@ $LocaleMap = @{
     'th' = @('th-TH')
     'tr' = @('tr-TR')
     'tw' = @('zh-TW')
+    'hk' = @('zh-TW')   # zh-HK: uses zh-TW LP as display language base
     'ua' = @('uk-UA')
     'uk' = @('uk-UA')
     'us' = @('en-US')
@@ -429,11 +453,13 @@ function Get-CatalogSearchTerms {
         "Safe OS Dynamic Update for Windows 11 Version $versionString"
     }
 
+    # ARM64 uses different catalog titles than x64
+    $archLabel = if ($Architecture -eq "arm64") { "arm64" } else { "x64" }
     return @{
-        LCU           = "Cumulative Update for Windows 11 Version $versionString for x64"
-        DotNet        = "Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version $versionString for x64"
+        LCU           = "Cumulative Update for Windows 11 Version $versionString for $archLabel"
+        DotNet        = "Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version $versionString for $archLabel"
         SafeOS        = $safeOSSearch
-        SafeOSVersion = $versionString   # used in manual download instructions
+        SafeOSVersion = $versionString
     }
 }
 
@@ -560,7 +586,7 @@ function Dismount-AllISOs {
 }
 
 function Resolve-SourceFolder {
-    param([string]$Folder)
+    param([string]$Folder, [switch]$SkipLP)
 
     $isoFiles = Get-ChildItem $Folder -Filter "*.iso" -ErrorAction SilentlyContinue
 
@@ -586,6 +612,14 @@ function Resolve-SourceFolder {
             $name -match "_lp_"
         )
 
+        # Architecture filter for LP ISO: prefer the one matching requested arch.
+        # ARM64 LP ISO has "arm64" in filename; x64 LP ISO does not.
+        if ($isLPISO) {
+            $lpIsArm64 = $name -match "arm64"
+            $wantArm64 = $Architecture -eq "arm64"
+            if ($lpIsArm64 -ne $wantArm64) { $isLPISO = $false }
+        }
+
         # ── Windows OS ISO ────────────────────────────────────────────────────
         # Explicitly excluded: anything already matched as LP above
         $isWindowsISO = (
@@ -595,6 +629,13 @@ function Resolve-SourceFolder {
             $name -match "win.*11.*ent"      -or  # en-us_windows_11_enterprise_*
             $name -match "win.*11.*business"      # en-us_windows_11_business_*
         )
+
+        # Architecture filter: if -Architecture is set, only pick the matching ISO
+        if ($isWindowsISO) {
+            $isArm64 = $name -match "arm64"
+            $wantArm64 = $Architecture -eq "arm64"
+            if ($isArm64 -ne $wantArm64) { $isWindowsISO = $false }
+        }
 
         if ($isWindowsISO -and -not $result.WimFile) {
             Write-Info "Mounting Windows ISO: $($iso.Name)"
@@ -614,23 +655,27 @@ function Resolve-SourceFolder {
             }
 
         } elseif ($isLPISO -and -not $result.LPSearchRoot) {
-            Write-Info "Mounting Language Pack ISO: $($iso.Name)"
-            try {
-                $drive = Mount-ISOSafe -IsoPath $iso.FullName
-                # LP and FOD cabs are both under LanguagesAndOptionalFeatures\
-                $lpFodSubfolder = "$drive\LanguagesAndOptionalFeatures"
-                if (Test-Path $lpFodSubfolder) {
-                    $result.LPSearchRoot  = $lpFodSubfolder
-                    $result.FODSearchRoot = $lpFodSubfolder
-                    Write-OK "LP ISO mounted as ${drive}, using subfolder: LanguagesAndOptionalFeatures"
-                } else {
-                    # Subfolder not found - search whole ISO root
-                    $result.LPSearchRoot  = $drive
-                    $result.FODSearchRoot = $drive
-                    Write-OK "LP ISO mounted as $($drive) (no LanguagesAndOptionalFeatures subfolder, searching root)"
+            if ($SkipLP) {
+                Write-Info "Skipping Language Pack ISO (language packs disabled)"
+            } else {
+                Write-Info "Mounting Language Pack ISO: $($iso.Name)"
+                try {
+                    $drive = Mount-ISOSafe -IsoPath $iso.FullName
+                    # LP and FOD cabs are both under LanguagesAndOptionalFeatures\
+                    $lpFodSubfolder = "$drive\LanguagesAndOptionalFeatures"
+                    if (Test-Path $lpFodSubfolder) {
+                        $result.LPSearchRoot  = $lpFodSubfolder
+                        $result.FODSearchRoot = $lpFodSubfolder
+                        Write-OK "LP ISO mounted as ${drive}, using subfolder: LanguagesAndOptionalFeatures"
+                    } else {
+                        # Subfolder not found - search whole ISO root
+                        $result.LPSearchRoot  = $drive
+                        $result.FODSearchRoot = $drive
+                        Write-OK "LP ISO mounted as $($drive) (no LanguagesAndOptionalFeatures subfolder, searching root)"
+                    }
+                } catch {
+                    Write-Warn "Could not mount $($iso.Name): $_"
                 }
-            } catch {
-                Write-Warn "Could not mount $($iso.Name): $_"
             }
         }
     }
@@ -695,10 +740,16 @@ function Invoke-AutoUpdateDownload {
         Write-Info "     Query: $($CatalogSearchTerms[$type])"
 
         try {
-            $results = Get-MSCatalogUpdate -Search $CatalogSearchTerms[$type] -ErrorAction Stop
+            $results = Get-MSCatalogUpdate -Search $CatalogSearchTerms[$type] `
+                           -Architecture $Architecture -ErrorAction Stop
         } catch {
-            Write-Warn "Search failed for $label`: $($_.Exception.Message)"
-            continue
+            # -Architecture may not be supported in older versions of MSCatalogLTS - fall back
+            try {
+                $results = Get-MSCatalogUpdate -Search $CatalogSearchTerms[$type] -ErrorAction Stop
+            } catch {
+                Write-Warn "Search failed for $label`: $($_.Exception.Message)"
+                continue
+            }
         }
 
         if (-not $results -or $results.Count -eq 0) {
@@ -706,11 +757,12 @@ function Invoke-AutoUpdateDownload {
             continue
         }
 
-        # Filter out Preview builds and non-x64
+        # Filter out Preview builds and wrong architecture
         $filtered = $results | Where-Object {
             $_.Title -notmatch "\bPreview\b" -and
             $_.Title -notmatch "\bx86\b"     -and
-            $_.Title -notmatch "\barm64\b"
+            ($Architecture -eq "arm64" -or $_.Title -notmatch "\barm64\b") -and
+            ($Architecture -eq "x64"   -or $_.Title -notmatch "\bx64\b")
         }
         if (-not $filtered) { $filtered = $results }
 
@@ -719,15 +771,15 @@ function Invoke-AutoUpdateDownload {
         Write-Host "  Found   : $($best.Title)" -ForegroundColor Green
         Write-Host "  Date    : $($best.LastUpdated)" -ForegroundColor DarkGray
 
-        # Build canonical filename
+        # Build canonical filename - include architecture so x64 and arm64 are cached separately
         $kbMatch  = [regex]::Match($best.Title, "KB\d+")
         $kbNum    = if ($kbMatch.Success) { $kbMatch.Value } else { "KB_unknown" }
-        $fileName = "${prefix}_${type}_${kbNum}.msu"
+        $fileName = "${prefix}_${type}_${kbNum}_${Architecture}.msu"
         $destPath = Join-Path $DownloadDir $fileName
 
-        # Check if this KB is already in the cache folder
+        # Check if this KB is already in the cache folder (same arch only)
         $alreadyHave = Get-ChildItem $DownloadDir -Filter "*.msu" -ErrorAction SilentlyContinue |
-                       Where-Object { $_.Name -match $kbNum -and $_.Length -gt 1MB } |
+                       Where-Object { $_.Name -match $kbNum -and $_.Name -match $Architecture -and $_.Length -gt 1MB } |
                        Select-Object -First 1
 
         if ($alreadyHave) {
@@ -742,7 +794,7 @@ function Invoke-AutoUpdateDownload {
             # If the LCU was cached before -DownloadAll was introduced, prerequisites
             # may be missing. Re-run Save-MSCatalogUpdate -DownloadAll to fetch them.
             if ($type -eq "LCU") {
-                $hasCheckpoint = Get-ChildItem $DownloadDir -Filter "0_Checkpoint_*.msu" -ErrorAction SilentlyContinue |
+                $hasCheckpoint = Get-ChildItem $DownloadDir -Filter "0_Checkpoint_*_${Architecture}.msu" -ErrorAction SilentlyContinue |
                                  Select-Object -First 1
                 if (-not $hasCheckpoint) {
                     Write-Info "     No checkpoint prerequisites found - checking if required..."
@@ -754,7 +806,7 @@ function Invoke-AutoUpdateDownload {
                         foreach ($newFile in $newFiles) {
                             $fileKB = ([regex]::Match($newFile.Name, 'KB\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Value.ToUpper()
                             if ($fileKB -ne $kbNum) {
-                                $cpDest = Join-Path $DownloadDir "0_Checkpoint_${fileKB}.msu"
+                                $cpDest = Join-Path $DownloadDir "0_Checkpoint_${fileKB}_${Architecture}.msu"
                                 if (-not (Test-Path $cpDest)) {
                                     Rename-Item $newFile.FullName $cpDest -Force -ErrorAction SilentlyContinue
                                     Write-OK "Checkpoint prerequisite downloaded: 0_Checkpoint_${fileKB}.msu"
@@ -797,10 +849,10 @@ function Invoke-AutoUpdateDownload {
                         Rename-Item $newFile.FullName $destPath -Force -ErrorAction SilentlyContinue
                     }
                 } elseif ($type -eq "LCU") {
-                    $cpDest = Join-Path $DownloadDir "0_Checkpoint_${fileKB}.msu"
+                    $cpDest = Join-Path $DownloadDir "0_Checkpoint_${fileKB}_${Architecture}.msu"
                     if (-not (Test-Path $cpDest)) {
                         Rename-Item $newFile.FullName $cpDest -Force -ErrorAction SilentlyContinue
-                        Write-OK "Checkpoint prerequisite: 0_Checkpoint_${fileKB}.msu"
+                        Write-OK "Checkpoint prerequisite: 0_Checkpoint_${fileKB}_${Architecture}.msu"
                     }
                 }
             }
@@ -827,17 +879,20 @@ function Invoke-AutoUpdateDownload {
     Write-Host ""
     Write-Host "  >> Safe OS Dynamic Update (WinRE)" -ForegroundColor White
 
-    $safeOSExisting = Get-ChildItem $DownloadDir -Filter "3_SafeOS_*.cab" -ErrorAction SilentlyContinue |
+    $safeOSExisting = Get-ChildItem $DownloadDir -Filter "3_SafeOS_*_${Architecture}.cab" -ErrorAction SilentlyContinue |
                       Select-Object -First 1
     if (-not $safeOSExisting) {
+        # Also catch original MSCatalog download names (e.g. windows11.0-kb5083482-arm64.cab)
+        # Both patterns must match the correct architecture.
         $safeOSExisting = Get-ChildItem $DownloadDir -Filter "*.cab" -ErrorAction SilentlyContinue |
-                          Where-Object { $_.Name -match "SafeOS" -and $_.Length -gt 1MB } |
+                          Where-Object { ($_.Name -match "SafeOS.*_${Architecture}" -or $_.Name -match "windows11\.0-kb\d+-$Architecture") -and
+                                         $_.Length -gt 1MB } |
                           Select-Object -First 1
     }
 
     if ($safeOSExisting) {
         Write-OK "Found SafeOS in cache: $($safeOSExisting.Name)"
-        $canonical = Join-Path $DownloadDir "3_SafeOS_$(([regex]::Match($safeOSExisting.Name,'KB\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Value.ToUpper()).cab"
+        $canonical = Join-Path $DownloadDir "3_SafeOS_$(([regex]::Match($safeOSExisting.Name,'KB\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Value.ToUpper())_${Architecture}.cab"
         if ($safeOSExisting.FullName -ne $canonical -and [regex]::IsMatch($safeOSExisting.Name, 'KB\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
             Rename-Item $safeOSExisting.FullName $canonical -ErrorAction SilentlyContinue
         }
@@ -855,10 +910,11 @@ function Invoke-AutoUpdateDownload {
                 $candidates = Get-MSCatalogUpdate -Search $term -IncludeDynamic -ErrorAction Stop |
                               Where-Object {
                                   $_.Title -match "Safe OS" -and
-                                  $_.Title -match "x64"     -and
+                                  $_.Title -match $Architecture -and
                                   $_.Title -match $versionStr -and
                                   $_.Title -notmatch "\bPreview\b" -and
-                                  $_.Title -notmatch "\barm64\b"
+                                  ($Architecture -eq "arm64" -or $_.Title -notmatch "\barm64\b") -and
+                                  ($Architecture -eq "x64"   -or $_.Title -notmatch "\bx64\b")
                               } |
                               Sort-Object LastUpdated -Descending |
                               Select-Object -First 1
@@ -875,17 +931,17 @@ function Invoke-AutoUpdateDownload {
         if ($safeOSResult) {
             Write-OK "Found: $($safeOSResult.Title)"
             $safeKB   = [regex]::Match($safeOSResult.Title, 'KB\d+').Value
-            $safeDest = Join-Path $DownloadDir "3_SafeOS_${safeKB}.cab"
+            $safeDest = Join-Path $DownloadDir "3_SafeOS_${safeKB}_${Architecture}.cab"
             try {
                 Save-MSCatalogUpdate -Update $safeOSResult -Destination $DownloadDir -ErrorAction Stop
                 # Rename to canonical
                 $savedSafe = Get-ChildItem $DownloadDir -Filter "*.cab" |
-                             Where-Object { $_.Name -match $safeKB -and $_.Name -ne "3_SafeOS_${safeKB}.cab" } |
+                             Where-Object { $_.Name -match $safeKB -and $_.Name -ne "3_SafeOS_${safeKB}_${Architecture}.cab" } |
                              Select-Object -First 1
                 if ($savedSafe) { Rename-Item $savedSafe.FullName $safeDest -Force }
                 if (Test-Path $safeDest) {
                     $sizeMB = [math]::Round((Get-Item $safeDest).Length / 1MB, 0)
-                    Write-OK "Downloaded: 3_SafeOS_${safeKB}.cab ($sizeMB MB)"
+                    Write-OK "Downloaded: 3_SafeOS_${safeKB}_${Architecture}.cab ($sizeMB MB)"
                     $downloaded++
                 }
             } catch {
@@ -897,9 +953,9 @@ function Invoke-AutoUpdateDownload {
             Write-Host "  To download SafeOS manually:" -ForegroundColor Yellow
             Write-Host "  1. Go to https://www.catalog.update.microsoft.com" -ForegroundColor White
             Write-Host "  2. Search for: Safe OS Dynamic Update Windows 11 $versionStr" -ForegroundColor White
-            Write-Host "  3. Download the .cab file for x64" -ForegroundColor White
+            Write-Host "  3. Download the .cab file for $Architecture" -ForegroundColor White
             Write-Host "  4. Save it to: $DownloadDir" -ForegroundColor White
-            Write-Host "  5. Name it:    3_SafeOS_KBxxxxxxx.cab" -ForegroundColor White
+            Write-Host "  5. Name it:    3_SafeOS_KBxxxxxxx_${Architecture}.cab" -ForegroundColor White
             Write-Host "  The script will use it on the next run, or you can add it now" -ForegroundColor DarkGray
             Write-Host "  and re-run with -SkipLanguagePacks to save time." -ForegroundColor DarkGray
             Write-Host ""
@@ -990,14 +1046,16 @@ if ($PatchMode) {
 Write-Section "Step 1/4 - Source folder"
 
 Write-Host ""
-Write-Host "  Place these TWO ISO files in a single folder, e.g. $($ScriptRoot)\ISO-Source\" -ForegroundColor White
+Write-Host "  Place the matching ISO files in a single folder, e.g. $($ScriptRoot)\ISO-Source\" -ForegroundColor White
 Write-Host ""
 Write-Host "  [1] Windows 11 Enterprise 25H2 ISO" -ForegroundColor Yellow
-Write-Host "      Filename like: SW_DVD9_Win_Pro_11_25H2_64BIT_English_Pro_Ent_EDU_N_MLF_*.ISO" -ForegroundColor DarkGray
+Write-Host "      x64:   SW_DVD9_Win_Pro_11_25H2_64BIT_English_Pro_Ent_EDU_N_MLF_*.ISO" -ForegroundColor DarkGray
+Write-Host "      ARM64: SW_DVD9_Win_Pro_11_25H2*Arm64_English_Pro_Ent_EDU_N_MLF_*.ISO" -ForegroundColor DarkGray
 Write-Host "      (Future versions will follow same pattern: Win_Pro_11_26H2_...)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  [2] Language Pack ISO (also contains all FOD packages - no separate FOD ISO needed)" -ForegroundColor Yellow
-Write-Host "      Filename like: SW_DVD9_Win_11_24H2_25H2_x64_Multilang_LangPack_All_LIP_LoF_*.ISO" -ForegroundColor DarkGray
+Write-Host "      x64:   SW_DVD9_Win_11_24H2_25H2_x64_MultiLang_LangPackAll_LIP_LoF_*.ISO" -ForegroundColor DarkGray
+Write-Host "      ARM64: SW_DVD9_Win_11_24H2_25H2_Arm64_MultiLang_LangPackAll_LIP_LoF_*.ISO" -ForegroundColor DarkGray
 Write-Host "      (Future versions will follow same pattern: Win_11_26H2_..._LangPack_...)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  Download both ISOs from the Microsoft 365 Admin Center:" -ForegroundColor White
@@ -1017,7 +1075,7 @@ if (-not (Test-Path $SourceFolder)) {
 # ── Discover and mount ISOs ───────────────────────────────────────────────────
 
 Write-Info "Scanning $SourceFolder for ISO files..."
-$discovered = Resolve-SourceFolder -Folder $SourceFolder
+$discovered = Resolve-SourceFolder -Folder $SourceFolder -SkipLP:$SkipLanguagePacks
 
 # Resolved variables used throughout the rest of the script
 $wimFile      = $null
@@ -1031,11 +1089,12 @@ if ($discovered) {
     $LPSearchRoot  = $discovered.LPSearchRoot
     $FODSearchRoot = $discovered.FODSearchRoot
 
-    # If LP ISO was not found, note it - the Step 2 pre-flight will handle the error
-    # with a proper message. Don't silently fall back to searching the whole source folder
-    # as that would give confusing errors instead of a clear "LP ISO missing" message.
+    # If LP ISO was not found (and not skipped), note it - the Step 2 pre-flight will handle
+    # the error with a proper message. Don't silently fall back to the whole source folder.
     if (-not $LPSearchRoot) {
-        Write-Warn "No Language Pack ISO found in $SourceFolder"
+        if (-not $SkipLanguagePacks) {
+            Write-Warn "No Language Pack ISO found in $SourceFolder"
+        }
         $LPSearchRoot  = $SourceFolder   # fallback so later code doesn't crash on null
         $FODSearchRoot = $SourceFolder
     }
@@ -1117,7 +1176,7 @@ if ($WimIndex -ne 0) {
 $chosenImageFull  = Get-WindowsImage -ImagePath $wimFile -Index $WimIndex
     $CatalogSearchTerms = Get-CatalogSearchTerms -WimVersion $chosenImageFull.Version
 
-} # end if -not PatchMode
+} # end if ($PatchMode)
 
 #endregion
 
@@ -1140,7 +1199,20 @@ if (-not $SkipLanguagePacks) {
         Write-Host "  (Press Enter for default: se,no,dk,fi)" -ForegroundColor DarkGray
         $langInput = Read-Host "  Languages"
         if ($langInput.Trim() -eq "") { $langInput = "se,no,dk,fi" }
+        $Languages = $langInput   # store for supplemental FOD resolution below
         $ResolvedLocales = @(Resolve-LanguageCodes -CodeString $langInput)
+    }
+
+    # Build supplemental FOD locale list - locales that need extra FODs beyond their base LP.
+    # e.g. 'hk' resolves to zh-TW for the LP but also needs zh-HK specific FODs.
+    $SupplementalFODMap = @{
+        'hk' = 'zh-HK'   # zh-HK FODs on top of zh-TW LP
+    }
+    $SupplementalFODLocales = @()
+    foreach ($code in ($Languages.ToLower().Split(',') | ForEach-Object { $_.Trim() })) {
+        if ($SupplementalFODMap.ContainsKey($code)) {
+            $SupplementalFODLocales += $SupplementalFODMap[$code]
+        }
     }
 
     if (-not $SkipLanguagePacks) {
@@ -1153,11 +1225,17 @@ if (-not $SkipLanguagePacks) {
         $allLPCabs = @(Get-ChildItem $LPSearchRoot -Filter "*.cab" -ErrorAction SilentlyContinue)
         Write-Info "Found $($allLPCabs.Count) cab files in LP folder."
 
+        # LP cab filenames use "x64" for x64 ISO and "arm64" for ARM64 ISO.
+        # FOD cabs use "amd64" for x64 and "arm64" for ARM64.
+        $lpArchStr  = if ($Architecture -eq "arm64") { "arm64" } else { "x64" }
+        $fodArchStr = if ($Architecture -eq "arm64") { "arm64" } else { "amd64" }
+
         # Validate each language before installing
         $anyMissing = $false
         foreach ($lang in $ResolvedLocales) {
-            $lp  = $allLPCabs | Where-Object { $_.Name -match "Language-Pack_x64_$lang" } | Select-Object -First 1
-            $fod = $allLPCabs | Where-Object { $_.Name -match "LanguageFeatures-Basic-$lang" } | Select-Object -First 1
+            $lp  = $allLPCabs | Where-Object { $_.Name -match "Language-Pack_${lpArchStr}_$lang" } | Select-Object -First 1
+            $fod = $allLPCabs | Where-Object { $_.Name -match "LanguageFeatures-Basic-$lang" -and
+                                               $_.Name -match "~${fodArchStr}~" } | Select-Object -First 1
             if (-not $lp)  { $anyMissing = $true }
             if (-not $fod) { $anyMissing = $true }
             $lc  = if ($lp)  { "Green" } else { "Red" }
@@ -1292,9 +1370,13 @@ if ($PatchMode) {
     $_langStr = if ($SkipLanguagePacks -or @($ResolvedLocales).Count -eq 0) {
         "en"
     } else {
-        ($ResolvedLocales | ForEach-Object { $_.Split('-')[1].ToLower() }) -join "_"
+        # Use the raw user-supplied codes for the filename (e.g. da,fi,no,se -> da_fi_no_se)
+        # This matches the GUI filename preview exactly.
+        $rawCodes = $Languages.ToLower().Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        if ($rawCodes) { $rawCodes -join "_" } else { "en" }
     }
-    $_autoName = "Win11_${_versionStr}_${_buildStr}_${_langStr}_${_dateStr}.wim"
+    $_archSuffix = if ($Architecture -eq "arm64") { "_arm64" } else { "" }
+    $_autoName = "Win11_${_versionStr}_${_buildStr}_${_langStr}${_archSuffix}_${_dateStr}.wim"
 }
 $_autoPath   = Join-Path (Split-Path $OutputPath -Parent) $_autoName
 
@@ -1331,8 +1413,7 @@ Write-Host "    Edition       : [$WimIndex] $($chosenImage.ImageName)" -Foregrou
 
 if (-not $SkipLanguagePacks) {
     Write-Host "    Language packs: $($ResolvedLocales -join ', ')  (+ FOD)" -ForegroundColor Cyan
-    Write-Host "    LP source     : $LPSearchRoot" -ForegroundColor Cyan
-    Write-Host "    FOD source    : $FODSearchRoot" -ForegroundColor Cyan
+    Write-Host "    LP/FOD source : $LPSearchRoot" -ForegroundColor Cyan
 }
 
 if (-not $SkipUpdates -and $resolvedUpdatePath) {
@@ -1414,6 +1495,22 @@ try {
 
     # Mount
     Write-Section "Mounting WIM"
+
+    # Check for stale mount from a previous interrupted build and clean up
+    $existingFiles = @(Get-ChildItem $mountDir -ErrorAction SilentlyContinue)
+    if ($existingFiles.Count -gt 0) {
+        Write-Warn "Mount directory is not empty - attempting to clean up stale mount..."
+        try {
+            Dismount-WindowsImage -Path $mountDir -Discard -ErrorAction Stop
+            Write-OK "Stale mount dismounted (discarded)"
+        } catch {
+            Write-Warn "Could not dismount: $($_.Exception.Message)"
+        }
+        # Force-clean the directory regardless
+        Remove-Item "$mountDir\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Write-OK "Mount directory cleared"
+    }
+
     Mount-WindowsImage -ImagePath $workWim -Index $workWimIndex -Path $mountDir
     Write-OK "Mounted at: $mountDir"
     Write-Log "WIM mounted"
@@ -1437,12 +1534,29 @@ try {
             "Microsoft-Windows-WirelessDisplay-FOD-Package"
         )
 
+        # Font pack tag mapping: locale -> font CAB tag in LanguagesAndOptionalFeatures
+        # These languages require supplemental font packs for correct text rendering.
+        # CAB pattern: Microsoft-Windows-LanguageFeatures-Fonts-<Tag>-Package~...~amd64~~.cab (x64)
+        #                                                                       ~arm64~~.cab (arm64)
+        # Source: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/features-on-demand-language-fod
+        $FontTagMap = @{
+            'ar-SA' = 'Arab'   # Arabic
+            'he-IL' = 'Hebr'   # Hebrew
+            'ja-JP' = 'Jpan'   # Japanese
+            'ko-KR' = 'Kore'   # Korean
+            'th-TH' = 'Thai'   # Thai
+            'zh-CN' = 'Hans'   # Chinese Simplified
+            'zh-TW' = 'Hant'   # Chinese Traditional (also covers zh-HK region)
+        }
+        # Track which font tags have already been installed to avoid duplicates
+        $installedFontTags = [System.Collections.Generic.HashSet[string]]::new()
+
         foreach ($lang in $ResolvedLocales) {
             Write-Host ""
             Write-Host "  >> $($lang.ToUpper())" -ForegroundColor White
 
             # LP - use cached scan
-            $lp = $allLPCabs | Where-Object { $_.Name -match "Language-Pack_x64_$lang" } | Select-Object -First 1
+            $lp = $allLPCabs | Where-Object { $_.Name -match "Language-Pack_${lpArchStr}_$lang" } | Select-Object -First 1
             if ($lp) {
                 Add-WindowsPackage -PackagePath $lp.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
                 Write-OK "LP: $($lp.Name)"
@@ -1454,7 +1568,8 @@ try {
 
             # Language feature FODs - use cached scan
             foreach ($fodType in @("Basic","OCR","Handwriting","Speech","TextToSpeech")) {
-                $fod = $allLPCabs | Where-Object { $_.Name -match "LanguageFeatures-$fodType-$lang" } | Select-Object -First 1
+                $fod = $allLPCabs | Where-Object { $_.Name -match "LanguageFeatures-$fodType-$lang" -and
+                                                   $_.Name -match "~${fodArchStr}~" } | Select-Object -First 1
                 if ($fod) {
                     Add-WindowsPackage -PackagePath $fod.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
                     Write-OK "${fodType}: $($fod.Name)"
@@ -1466,7 +1581,7 @@ try {
             foreach ($sysFod in $systemFODNames) {
                 $tagged = $allLPCabs |
                           Where-Object { $_.Name -match [regex]::Escape($sysFod) -and
-                                         $_.Name -match "~amd64~$([regex]::Escape($lang))~" } |
+                                         $_.Name -match "~${fodArchStr}~$([regex]::Escape($lang))~" } |
                           Select-Object -First 1
                 if ($tagged) {
                     Add-WindowsPackage -PackagePath $tagged.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
@@ -1474,7 +1589,46 @@ try {
                     Write-Log "System FOD [$lang]: $($tagged.FullName)"
                 }
             }
+
+            # Font pack - only for languages that require supplemental fonts,
+            # and only once per font tag (zh-CN and zh-TW share 'Hant'/'Hans')
+            if ($FontTagMap.ContainsKey($lang)) {
+                $tag = $FontTagMap[$lang]
+                if ($installedFontTags.Add($tag)) {
+                    $fontCab = $allLPCabs | Where-Object { $_.Name -match "LanguageFeatures-Fonts-$tag-Package" -and
+                                                            $_.Name -match "~${fodArchStr}~" } | Select-Object -First 1
+                    if ($fontCab) {
+                        Add-WindowsPackage -PackagePath $fontCab.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
+                        Write-OK "  Font pack [$tag]: $($fontCab.Name)"
+                        Write-Log "Font FOD [$tag]: $($fontCab.FullName)"
+                    } else {
+                        Write-Warn "  Font pack [$tag] not found in LP ISO (optional)"
+                        Write-Log "WARN: Font FOD [$tag] not found" "WARN"
+                    }
+                } else {
+                    Write-Info "  Font pack [$tag] already installed"
+                }
+            }
         } # end foreach lang
+
+        # ── Supplemental FOD pass (e.g. zh-HK FODs on top of zh-TW LP) ───────
+        # Some locales have region-specific FODs (Handwriting, OCR, TextToSpeech)
+        # even though they share a base LP with another locale.
+        if ($SupplementalFODLocales.Count -gt 0) {
+            foreach ($supLang in $SupplementalFODLocales) {
+                Write-Host ""
+                Write-Host "  >> $($supLang.ToUpper()) (supplemental FODs)" -ForegroundColor White
+                foreach ($fodType in @("Basic","OCR","Handwriting","Speech","TextToSpeech")) {
+                    $fod = $allLPCabs | Where-Object { $_.Name -match "LanguageFeatures-$fodType-$supLang" -and
+                                                       $_.Name -match "~${fodArchStr}~" } | Select-Object -First 1
+                    if ($fod) {
+                        Add-WindowsPackage -PackagePath $fod.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
+                        Write-OK "  ${fodType}: $($fod.Name)"
+                        Write-Log "Supplemental FOD [$supLang]: $($fod.FullName)"
+                    }
+                }
+            }
+        }
 
         # ── Block language pack cleanup for installed languages ────────────────
         # Without this, Windows scheduled tasks remove "unused" language FODs at
@@ -1519,8 +1673,7 @@ try {
             try { reg unload "HKLM\WW_SOFTWARE" 2>$null | Out-Null } catch {}
         }
 
-
-    }
+    } # end if (-not $SkipLanguagePacks)
 
     # Updates
     if (-not $SkipUpdates -and $resolvedUpdatePath) {
@@ -1531,7 +1684,12 @@ try {
         $allUpdateFiles = @(
             Get-ChildItem $resolvedUpdatePath -Filter "*.msu" -ErrorAction SilentlyContinue
             Get-ChildItem $resolvedUpdatePath -Filter "*.cab" -ErrorAction SilentlyContinue
-        ) | Sort-Object Name
+        ) | Where-Object {
+            # Filter by architecture: keep files matching current arch, skip files with the other arch suffix
+            $_.Name -notmatch "_x64\." -or $Architecture -eq "x64" } |
+          Where-Object {
+            $_.Name -notmatch "_arm64\." -or $Architecture -eq "arm64"
+        } | Sort-Object Name
         $safeOSFiles = @($allUpdateFiles | Where-Object { $_.Name -match "SafeOS" })
         $lcuFiles    = @($allUpdateFiles | Where-Object { $_.Name -match "^1_LCU" -or $_.Name -match "^0_" })
         $dotNetFiles = @($allUpdateFiles | Where-Object { $_.Name -match "^2_DotNet" })
@@ -1683,14 +1841,14 @@ try {
                     foreach ($safeOS in $safeOSFiles) {
                         Write-Host "  >> SafeOS -> WinRE: $($safeOS.Name)" -ForegroundColor White
                         try {
-                            Add-WindowsPackage -PackagePath $safeOS.FullName -Path $winreMountDir -ScratchDirectory $scratchDir | Out-Null
+                            Add-WindowsPackage -PackagePath $safeOS.FullName -Path $winreMountDir -ScratchDirectory $scratchDir -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
                             Write-OK "SafeOS Dynamic Update applied to WinRE"
                             Write-Log "WinRE SafeOS OK: $($safeOS.Name)"
                         } catch {
                             $err = $_.Exception.Message
                             if ($err -match "0x800f081e") {
-                                Write-Info "SafeOS already current in WinRE - skipping"
-                                Write-Log "WinRE SafeOS not applicable (already current)" "INFO"
+                                Write-Info "SafeOS not applicable to this WinRE (version already current or update targets a different build)"
+                                Write-Log "WinRE SafeOS 0x800f081e - skipped" "INFO"
                             } else {
                                 Write-Warn "SafeOS failed: $err"
                                 Write-Log "WARN WinRE SafeOS: $err" "WARN"
