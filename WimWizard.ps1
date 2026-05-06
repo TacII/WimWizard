@@ -588,8 +588,11 @@ function Dismount-AllISOs {
 function Resolve-SourceFolder {
     param([string]$Folder, [switch]$SkipLP)
 
-    $isoFiles = Get-ChildItem $Folder -Filter "*.iso" -ErrorAction SilentlyContinue
-
+    $isoFiles = @()
+    Get-ChildItem $Folder -Filter "*.iso" -ErrorAction SilentlyContinue | ForEach-Object {
+        $isoFiles += $_
+    }
+    
     if (-not $isoFiles -or $isoFiles.Count -eq 0) {
         return $null
     }
