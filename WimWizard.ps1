@@ -406,7 +406,7 @@ if ($PatchMode) {
 # Trap ensures ISOs are always dismounted even if the script exits early (Ctrl+C, error, user cancel)
 trap {
     Write-Host ""
-    Write-Fail "Unhandled error: $($_.Exception.Message)"
+    Write-Fail "Unhandled error (Line $($_.InvocationInfo.ScriptLineNumber)): $($_.Exception.Message)"
     Dismount-AllISOs
     break
 }
@@ -592,7 +592,7 @@ function Resolve-SourceFolder {
     Get-ChildItem $Folder -Filter "*.iso" -ErrorAction SilentlyContinue | ForEach-Object {
         $isoFiles += $_
     }
-    
+
     if (-not $isoFiles -or $isoFiles.Count -eq 0) {
         return $null
     }
