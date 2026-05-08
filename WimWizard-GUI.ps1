@@ -14,11 +14,16 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.2.1
+  Version : 2.2.3
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.2.3  Fixed blue ribbon "WIM WIZARD" text not rendering bold. Added missing
+         $FontTitle definition (Segoe UI 14pt Bold).
+  2.2.2  Window title now shows both versions: "WIM Wizard v<script> / v<gui>
+         - A tribute to WIM Witch", with both read dynamically. Blue ribbon
+         simplified to "WIM WIZARD" only (no version numbers).
   2.2.1  Renamed 'en' language entry to 'gb' (English British). Now injects
          only en-GB instead of en-GB + en-US. en-US is always present as the
          base image fallback and does not need to be injected. Filename preview
@@ -278,6 +283,7 @@ $ColWarn  = [System.Drawing.Color]::FromArgb(255, 185, 0)
 $FontMain  = New-Object System.Drawing.Font("Segoe UI", 9)
 $FontBold  = New-Object System.Drawing.Font("Segoe UI", 9,  [System.Drawing.FontStyle]::Bold)
 $FontSmall  = New-Object System.Drawing.Font("Segoe UI", 8)
+$FontTitle  = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
 
 # -- Helper: dark checkbox ------------------------------------------------------
 function New-DarkCheckbox {
@@ -306,7 +312,7 @@ function Get-FilenamePreview {
   return "Win11_${edition}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.2.1"
+$WimWizardVersion = "2.2.3"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -332,7 +338,7 @@ $_btnImage  = [System.Drawing.Image]::FromStream($_btnStream)
 
 # -- Main form ------------------------------------------------------------------
 $Form  = New-Object System.Windows.Forms.Form
-$Form.Text  = "WIM Wizard v$WimWizardVersion  -  A tribute to WIM Witch"
+$Form.Text  = "WIM Wizard v$ScriptVer / v$WimWizardVersion  -  A tribute to WIM Witch"
 $Form.Size  = New-Object System.Drawing.Size(780, 620)
 $Form.MinimumSize  = $Form.Size
 $Form.StartPosition  = "CenterScreen"
@@ -351,7 +357,7 @@ $PanelTitle.BackColor  = $ColAccent
 $Form.Controls.Add($PanelTitle)
 
 $LblTitle  = New-Object System.Windows.Forms.Label
-$LblTitle.Text  = "  WIM WIZARD  v$ScriptVer / GUI v$WimWizardVersion"
+$LblTitle.Text  = "  WIM WIZARD"
 $LblTitle.Font  = $FontTitle
 $LblTitle.ForeColor  = $ColFg
 $LblTitle.Dock  = "Left"
