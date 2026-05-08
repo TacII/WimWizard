@@ -95,12 +95,29 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.1.5
-    Date        : 2026-05-07
+    Version     : 5.1.6
+    Date        : 2026-05-08
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.1.6  Fix: $lcuFile selector now requires .msu extension. Previously any file
+           matching "^windows11.0-kb<n>-" passed the filter, including old-named
+           SafeOS .cab files (e.g. windows11.0-kb5083482-x64.cab). On runs where
+           the SafeOS had been renamed to 3_SafeOS_... but the original remained,
+           the .cab sorted before the real LCU .msu alphabetically and was selected
+           as the LCU for both install.wim pass 1 and pass 2, leaving the WIM
+           unpatched with no error.
+           Fix: SafeOS rename now deletes the old-named original when the canonical
+           3_SafeOS_... file already exists (from a prior run), preventing stale
+           duplicates from accumulating in the Updates folder.
+           Fix: Checkpoint download now removes any hash-less copy of kb5043080
+           after downloading the hash-named version, matching the LCU stale-file
+           cleanup behaviour.
+           Fix: RunOnce language fix injection now skipped in patch mode and when
+           -SkipAppxRemoval is set ($SkipAppxRemoval is forced true in patch mode).
+           The block was unconditional, so patch runs always overwrote the RunOnce
+           key and InstallSystemApps.ps1 baked in at full-build time.
     5.1.5  Fix: LP injection (Step 10) now handles 0x800f0952 gracefully. LTSC
            images (e.g. English International) ship with en-GB pre-installed;
            Add-WindowsPackage previously had no try/catch, so any error was
@@ -208,7 +225,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.1.5"
+$ScriptVersion = "5.1.6"
 
 # Validate architecture selection
 if ($X64 -and $ARM64) {
@@ -912,6 +929,11 @@ function Invoke-AutoUpdateDownload {
                         } else {
                             Write-OK "Checkpoint already cached: $cpName"
                         }
+                        # Remove any old hash-less copy of the checkpoint left from a previous run
+                        $cpKB = [regex]::Match($cpName, 'kb\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase).Value
+                        Get-ChildItem $DownloadDir -Filter "*.msu" -ErrorAction SilentlyContinue |
+                            Where-Object { $_.Name -match $cpKB -and $_.Name -notmatch '_[0-9a-f]{8,}' } |
+                            ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue; Write-Info "Removed old-named checkpoint: $($_.Name)" }
                         break
                     }
                 }
@@ -1008,7 +1030,13 @@ function Invoke-AutoUpdateDownload {
         Write-OK "Found SafeOS in cache: $($safeOSExisting.Name)"
         $canonical = Join-Path $DownloadDir "3_SafeOS_$(([regex]::Match($safeOSExisting.Name,'KB\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Value.ToUpper())_${Architecture}.cab"
         if ($safeOSExisting.FullName -ne $canonical -and [regex]::IsMatch($safeOSExisting.Name, 'KB\d+', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-            Rename-Item $safeOSExisting.FullName $canonical -ErrorAction SilentlyContinue
+            if (Test-Path $canonical) {
+                # Canonical already exists (from a previous run) - just delete the old-named duplicate
+                Remove-Item $safeOSExisting.FullName -Force -ErrorAction SilentlyContinue
+                Write-Info "Removed old-named SafeOS duplicate: $($safeOSExisting.Name)"
+            } else {
+                Rename-Item $safeOSExisting.FullName $canonical -ErrorAction SilentlyContinue
+            }
         }
         $downloaded++
     } else {
@@ -1765,9 +1793,11 @@ try {
         $safeOSFiles = @($allUpdateFiles | Where-Object { $_.Name -match "SafeOS" })
         $dotNetFiles = @($allUpdateFiles | Where-Object { $_.Name -match "^2_DotNet" })
 
-        # LCU file - original Microsoft filename (with hash in name)
+        # LCU file - original Microsoft filename (with hash in name), always .msu
+        # Explicitly require .msu to prevent old-named SafeOS .cab files (e.g.
+        # windows11.0-kb5083482-x64.cab) from matching and being selected as the LCU.
         $lcuFile = $allUpdateFiles |
-                   Where-Object { $_.Name -match "^windows11\.0-kb\d+-" -and $_.Name -notmatch "kb5043080" } |
+                   Where-Object { $_.Extension -eq ".msu" -and $_.Name -match "^windows11\.0-kb\d+-" -and $_.Name -notmatch "kb5043080" } |
                    Select-Object -First 1
 
         # Checkpoint file - original Microsoft filename (with hash in name)
@@ -2193,6 +2223,11 @@ try {
     # 3. Copies the script into the WIM at C:\ProgramData\WimWizard\
     # 4. Injects a RunOnce key into the Default User profile hive so the script
     #    runs at first logon for every new user
+    #
+    # Skipped in patch mode / -SkipAppxRemoval: the app list is tied to Appx
+    # removal decisions made at full-build time and must not be regenerated when
+    # patching an existing image.
+    if (-not $SkipAppxRemoval) {
 
     Write-Section "Injecting RunOnce language fix"
 
@@ -2335,6 +2370,8 @@ try {
             Write-Log "WARN: reg unload failed exit $LASTEXITCODE" "WARN"
         }
     }
+
+    } # end if (-not $SkipAppxRemoval) - RunOnce injection
 
     # ── Final component store cleanup with /ResetBase ────────────────────────
     # /ResetBase permanently marks superseded component baselines as reclaimable,
