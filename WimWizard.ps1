@@ -95,12 +95,23 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.1.6
+    Version     : 5.1.8
     Date        : 2026-05-08
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.1.8  Fix: Invoke-UpdateFolderCleanup no longer deletes old-named .msu/.cab
+           files unless a canonical equivalent for the same KB already exists.
+           Previously users upgrading from pre-5.1.6 with only an old-named cached
+           LCU would have it deleted on the first run, forcing a re-download.
+    5.1.7  New: Invoke-UpdateFolderCleanup runs automatically before each download
+           pass. Removes: (1) old-named hash-less LCU/checkpoint .msu files left by
+           older MSCatalogLTS code paths; (2) old-named SafeOS .cab files that were
+           not cleaned up after canonical renaming; (3) superseded canonical files
+           from previous months (0_Checkpoint / 1_LCU / 2_DotNet / 3_SafeOS) —
+           only the newest KB per type/arch is kept. Existing users with stale files
+           will have them cleaned automatically on the next run.
     5.1.6  Fix: $lcuFile selector now requires .msu extension. Previously any file
            matching "^windows11.0-kb<n>-" passed the filter, including old-named
            SafeOS .cab files (e.g. windows11.0-kb5083482-x64.cab). On runs where
@@ -225,7 +236,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.1.6"
+$ScriptVersion = "5.1.8"
 
 # Validate architecture selection
 if ($X64 -and $ARM64) {
@@ -749,6 +760,98 @@ function Install-MSCatalogLTS {
     } catch {
         Write-Warn "Could not install MSCatalogLTS: $($_.Exception.Message)"
         return $false
+    }
+}
+
+function Invoke-UpdateFolderCleanup {
+    # Removes legacy / stale files from the Updates folder that accumulate over time.
+    # Called automatically at the start of every download pass.
+    #
+    # Removes:
+    #   1. Old-named LCU / checkpoint .msu files — original Microsoft filenames without
+    #      the SHA1 hash segment (e.g. windows11.0-kb5083769-x64.msu). These were
+    #      produced by older MSCatalogLTS code paths and cause DISM signature failures.
+    #   2. Old-named SafeOS .cab files — original Microsoft filenames (e.g.
+    #      windows11.0-kb5083482-x64.cab) that remained after canonical renaming to
+    #      3_SafeOS_KB... and could be mistakenly selected as the LCU.
+    #   3. Superseded canonical files — all 0_Checkpoint / 1_LCU / 2_DotNet / 3_SafeOS
+    #      files from previous months that are no longer the current KB. Only the
+    #      newest KB for each prefix+arch combination is kept.
+    param([string]$DownloadDir)
+
+    if (-not (Test-Path $DownloadDir)) { return }
+
+    $cleaned = 0
+
+    # ── 1. Old-named LCU/checkpoint .msu (windows11.0-kb<n>-<arch>.msu, no hash) ──
+    # Only remove if a canonical file for the same KB already exists in the folder.
+    # This protects users upgrading from pre-5.1.6 whose only cached copy is the
+    # old-named file — we leave it in place; Invoke-AutoUpdateDownload will rename it.
+    Get-ChildItem $DownloadDir -Filter "*.msu" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "^windows11\.0-kb\d+-" -and $_.Name -notmatch '_[0-9a-f]{8,}' } |
+        ForEach-Object {
+            $oldFile = $_
+            $kb = ([regex]::Match($oldFile.Name, 'kb(\d+)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Groups[1].Value
+            # Check whether a canonical file for this KB already exists
+            $hasCanonical = [bool](Get-ChildItem $DownloadDir -Filter "*_KB${kb}*" -ErrorAction SilentlyContinue |
+                                   Where-Object { $_.Name -match '^[0-9]_' })
+            if ($hasCanonical) {
+                Write-Info "Cleanup: removing old-named MSU (canonical exists): $($oldFile.Name)"
+                Remove-Item $oldFile.FullName -Force -ErrorAction SilentlyContinue
+                $cleaned++
+            }
+        }
+
+    # ── 2. Old-named SafeOS .cab (windows11.0-kb<n>-<arch>.cab) ──────────────────
+    # Same safety check: only remove if the canonical 3_SafeOS_KB... already exists.
+    Get-ChildItem $DownloadDir -Filter "*.cab" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "^windows11\.0-kb\d+-" } |
+        ForEach-Object {
+            $oldFile = $_
+            $kb = ([regex]::Match($oldFile.Name, 'kb(\d+)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Groups[1].Value
+            $hasCanonical = [bool](Get-ChildItem $DownloadDir -Filter "3_SafeOS_KB${kb}*" -ErrorAction SilentlyContinue)
+            if ($hasCanonical) {
+                Write-Info "Cleanup: removing old-named CAB (canonical exists): $($oldFile.Name)"
+                Remove-Item $oldFile.FullName -Force -ErrorAction SilentlyContinue
+                $cleaned++
+            }
+        }
+
+    # ── 3. Superseded canonical files ────────────────────────────────────────────
+    # Group by prefix (e.g. "1_LCU") and architecture suffix, keep only the newest
+    # KB in each group. This handles both .msu and .cab canonical files.
+    # Canonical naming: <n>_<Label>_KB<number>_<arch>.<ext>
+    $canonicalPattern = '^(\d+_[^_]+)_KB(\d+)_(\w+)\.(msu|cab)$'
+
+    $allCanonical = Get-ChildItem $DownloadDir -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match $canonicalPattern }
+
+    # Group by prefix + arch + ext (e.g. "1_LCU_x64_msu")
+    $groups = $allCanonical | Group-Object {
+        $m = [regex]::Match($_.Name, $canonicalPattern)
+        "$($m.Groups[1].Value)_$($m.Groups[3].Value)_$($m.Groups[4].Value)"
+    }
+
+    foreach ($group in $groups) {
+        if ($group.Count -le 1) { continue }
+
+        # Sort by KB number descending — keep the highest
+        $sorted = $group.Group | Sort-Object {
+            $m = [regex]::Match($_.Name, $canonicalPattern)
+            [int]$m.Groups[2].Value
+        } -Descending
+
+        # Remove all but the first (newest)
+        $sorted | Select-Object -Skip 1 | ForEach-Object {
+            Write-Info "Cleanup: removing superseded file: $($_.Name)"
+            Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+            $cleaned++
+        }
+    }
+
+    if ($cleaned -gt 0) {
+        Write-OK "Update folder cleanup: removed $cleaned stale/superseded file(s)"
+        Write-Log "Update folder cleanup removed $cleaned file(s)"
     }
 }
 
@@ -1486,6 +1589,7 @@ if (-not $SkipUpdates) {
 
         if ($PatchMode -or (Confirm-Continue "Download updates now?")) {
             $cacheDir = "$ScriptRoot\Updates"
+            Invoke-UpdateFolderCleanup -DownloadDir $cacheDir
             $resolvedUpdatePath = Invoke-AutoUpdateDownload -DownloadDir $cacheDir
             if (-not $resolvedUpdatePath) {
                 Write-Warn "Automatic download failed. Falling back to manual mode..."
