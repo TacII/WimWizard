@@ -14,16 +14,21 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 ## Features
 
 - **Full image build** — Services a Windows 11 Enterprise WIM from a source ISO: language packs, FOD packages, cumulative updates (.NET, SafeOS/WinRE), and Appx removal
+- **Offline LCU on Windows 11 25H2 hosts** — 5.1.0 resolves the `0x800401e3`/`0x80070241` failure when building on a fully patched Windows 11 25H2 host. Uses `dism.exe /Add-Package` with the original SHA1-hashed filename from the Microsoft Update Catalog DownloadDialog API
+- **Microsoft-documented servicing sequence** — WinRE is patched before `install.wim`; LCU is applied twice (pass 1 SSU, pass 2 full) around language pack injection, following [Microsoft's media dynamic update sequence](https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update)
 - **Inbox app language fix** — Automatically generates and injects a RunOnce script into the Default User profile that reinstalls kept apps via winget at first user logon. This triggers the AppX framework to download the correct language satellites for the user's locale — no task sequence steps required
 - **Patch mode** — Patches an existing serviced WIM with the latest updates only, skipping ISO/LP steps. Ideal for monthly Patch Tuesday cycles
-- **Automatic update download** — Downloads LCU, .NET and SafeOS updates directly from the Microsoft Update Catalog via [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5). Already-downloaded KBs are reused automatically
-- **Language pack injection** — Supports all 39 languages available in the Microsoft LP ISO, including LIPs and FOD packages
+- **Automatic update download** — Downloads LCU, .NET and SafeOS updates directly from the Microsoft Update Catalog via [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5). Already-downloaded KBs are reused automatically. LCU is downloaded via DownloadDialog API to preserve the original filename (including SHA1 hash) required by DISM
+- **Language pack injection** — Supports all 39 languages available in the Microsoft LP ISO, including LIPs and FOD packages. Language FODs are injected via `Add-WindowsCapability` with capability names
+- **Features on Demand** — Optional injection of .NET Framework 3.5, OpenSSH Server, RSAT tools, WordPad, and Windows Media Player. Configurable via GUI or `-FoDList` parameter
 - **Appx removal** — 36 configurable inbox apps with sensible corporate defaults. Fully configurable via GUI
-- **WinRE patching** — Applies SSU + SafeOS updates to WinRE following the Microsoft documented sequence
+- **ARM64 support** — Builds ARM64 images from the ARM64 Windows ISO and ARM64 Language Pack ISO. All four ISOs (x64 + ARM64, Windows + LP) can coexist in `ISO-Source\`; the correct pair is selected automatically
+- **WinRE patching** — Applies SSU + SafeOS updates to WinRE following the Microsoft documented sequence, with `/ResetBase` cleanup isolated to WinRE only
 - **ISO validation** — GUI shows live ✔/✗ indicators for Windows ISO and Language Pack ISO. Run button hidden until prerequisites are met
 - **Registry persistence** — GUI saves all selections (languages, apps, options) to the registry and restores them on next launch
 - **Completion screen** — GUI minimizes while the build runs, restores and shows a completion screen when done
 - **ISO version probe** — GUI reads the Windows ISO at startup (from filename or by mounting) to display the real build number in the filename preview
+
 
 
 ---
@@ -31,11 +36,14 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 ## Requirements
 
 - Windows PowerShell 5.1 or later
-- Windows 11 Enterprise or Education source ISO (25H2 or later)
-- Windows 11 Language Pack ISO (contains all LP + FOD packages — no separate FOD ISO needed)
-- Administrator rights, both scripts need to be launched as Admin. (Mount command requires Admin-rights.)
+- Windows 11 Enterprise or Education source ISO (24H2 or later) — x64 and/or ARM64
+- Windows 11 Language Pack ISO to add languages (contains all LP + FOD packages — no separate FOD ISO needed) — x64 and/or ARM64
+- Administrator rights — both scripts must be launched as Admin (mount commands require elevation)
 - Internet access for automatic update download (or provide updates manually via `-UpdatePath`)
 - [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5) PowerShell module (installed automatically if missing)
+
+> **Host OS note:** As of 5.1.0, building on a fully patched **Windows 11 25H2** host is fully supported. Windows Server 2022 continues to work without restrictions.
+
 
 ---
 
@@ -71,8 +79,8 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 6. Import the finished WIM into SCCM/MECM:  
    `Software Library → Operating System Images → right-click → Update Distribution Points`
 
-7. If you are building images often you may want to exclude <driveletter>\WimWizard\Output from Microsoft Defender virus scanning.
-   Otherwise DISM will take twice as long to close the image.
+7. Exclude `<driveletter>\WimWizard\Output\` from Microsoft Defender real-time scanning — otherwise DISM LCU-patching will most likely fail.
+
 
 ---
 
@@ -117,6 +125,9 @@ Once you have a baseline image, use patch mode instead of rebuilding from scratc
 # Unattended with 4 Nordic languages
 .\WimWizard.ps1 -Languages "da,fi,no,se" -Unattended
 
+# ARM64 build
+.\WimWizard.ps1 -Languages "da,fi,no,se" -ARM64 -Unattended
+
 # Custom source folder and output path
 .\WimWizard.ps1 -Languages "da,fi,no,se" -SourceFolder "E:\ISO" -OutputPath "D:\Output\Win11.wim" -Unattended
 
@@ -126,6 +137,9 @@ Once you have a baseline image, use patch mode instead of rebuilding from scratc
 # With custom Appx list generated by the GUI
 .\WimWizard.ps1 -Languages "da,fi,no,se" -AppxListPath "WimWizard-AppxList.xml" -Unattended
 
+# With Features on Demand
+.\WimWizard.ps1 -Languages "da,fi,no,se" -FoDList "NetFx3,RsatAD" -Unattended
+
 # Show all parameters
 .\WimWizard.ps1 -Help
 ```
@@ -134,15 +148,35 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 
 ---
 
+## Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `-SourceFolder` | Folder containing ISOs. Default: `<ScriptRoot>\ISO-Source` |
+| `-Languages` | Comma-separated country codes: `da,fi,no,se`. Interactive prompt if omitted |
+| `-OutputPath` | Full path for finished WIM. Auto-generated from build/languages/date if omitted |
+| `-AppxListPath` | XML with custom Appx removal list (generated by GUI) |
+| `-FoDList` | Comma-separated FoD keys to inject, e.g. `NetFx3,RsatAD,OpenSSH` |
+| `-PatchExistingWim` | Path to existing WIM to patch (updates only — skips LP/Appx) |
+| `-UpdatePath` | Manual override for update files folder |
+| `-WimIndex` | Force a specific WIM index. Default: `0` (auto-detect Enterprise) |
+| `-X64` | Build x64 image (default) |
+| `-ARM64` | Build ARM64 image |
+| `-SkipUpdates` | Skip downloading and applying updates |
+| `-SkipLanguagePacks` | Skip language pack injection |
+| `-SkipAppxRemoval` | Keep all inbox apps |
+| `-Unattended` | No interactive prompts — suitable for automation |
+| `-DebugBuild` | Extra diagnostics: full DISM output and pending package dumps in log |
+| `-Help` | Show help |
+
 
 ## Versions
 
 | Component | Version |
 |-----------|---------|
-| WimWizard.ps1 | 4.7.0 |
-| WimWizard-GUI.ps1 | 1.7.0 |
+| WimWizard.ps1 | 5.1.0 |
+| WimWizard-GUI.ps1 | 1.9.1 |
 | Windows 11 target | 25H2 (26200.x) / 24H2 (26100.x) |
-
 
 ---
 
