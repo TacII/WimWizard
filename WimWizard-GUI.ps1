@@ -14,11 +14,21 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.2.3
+  Version : 2.2.5
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.2.5  Fix: Read-WimLanguages no longer touches the language checkboxes.
+         Previously, selecting a patch WIM would check the boxes for every
+         language present in the WIM (e.g. da,fi,no,se), overriding the
+         user's own selection. The function now only stores the WIM locale
+         list for informational logging; checkboxes are unaffected.
+  2.2.4  Fix: In patch mode, -Languages, -SourceFolder, -FoDList, and
+         -SkipLanguagePacks are no longer passed to WimWizard.ps1 — they are
+         irrelevant when patching an existing WIM. Output filename is now
+         derived from the source WIM (preserving all language codes in the
+         name) rather than from the GUI language checkbox selection.
   2.2.3  Fixed blue ribbon "WIM WIZARD" text not rendering bold. Added missing
          $FontTitle definition (Segoe UI 14pt Bold).
   2.2.2  Window title now shows both versions: "WIM Wizard v<script> / v<gui>
@@ -312,7 +322,7 @@ function Get-FilenamePreview {
   return "Win11_${edition}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.2.3"
+$WimWizardVersion = "2.2.5"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -1363,19 +1373,14 @@ $BtnRun.Controls.Add($LblRunText)
 
 # -- Read languages from existing WIM and pre-check matching boxes ------------
 function Read-WimLanguages {
+    # Reads language metadata from a WIM for informational purposes only.
+    # Does NOT touch the language checkboxes — those belong to the user's
+    # language-pack selection for ISO builds and are irrelevant in patch mode.
     param([string]$WimPath)
     try {
         $info = Get-WindowsImage -ImagePath $WimPath -Index 1 -ErrorAction Stop
-        # Uncheck all first
-        foreach ($cb in $LangCheckboxes.Values) { $cb.Checked = $false }
-        # Map installed locales back to country codes and check matching boxes
-        foreach ($locale in $info.Languages) {
-            $countryCode = $locale.Split('-')[-1].ToLower()
-            if ($LangCheckboxes.ContainsKey($countryCode)) {
-                $LangCheckboxes[$countryCode].Checked = $true
-            }
-        }
-        Write-Host "Read languages from WIM: $($info.Languages -join ', ')" -ForegroundColor DarkGray
+        $Script:PatchWimLocales = $info.Languages   # stored for display/logging
+        Write-Host "  WIM contains: $($info.Languages -join ', ')" -ForegroundColor DarkGray
     } catch {
         [System.Windows.Forms.MessageBox]::Show(
             "Could not read WIM metadata:`n$($_.Exception.Message)",
@@ -1452,22 +1457,25 @@ function Build-CommandString {
 
   $cmd = ".\WimWizard.ps1"
 
-  if ($selCodes.Count -gt 0) {
-  $cmd += " -Languages `"$($selCodes -join ',')`""
-  }
-
-  $src = $TxtSource.Text.Trim()
-  if ($src -and $src -ne "$ScriptRoot\ISO-Source") {
-  $cmd += " -SourceFolder `"$src`""
-  }
-
-  # Compute output filename / preview (single source of truth)
+  # Patch mode: languages, source folder, and FoD are read from the WIM — do not pass them
   $patchWimValid = $ChkPatchMode.Checked -and
                    $TxtPatchWim.Text -ne "Select existing WIM file..." -and
                    $TxtPatchWim.Text -ne ""
+
+  if ($selCodes.Count -gt 0 -and -not $patchWimValid) {
+    $cmd += " -Languages `"$($selCodes -join ',')`""
+  }
+
+  $src = $TxtSource.Text.Trim()
+  if ($src -and $src -ne "$ScriptRoot\ISO-Source" -and -not $patchWimValid) {
+    $cmd += " -SourceFolder `"$src`""
+  }
+
+  # Compute output filename / preview (single source of truth)
   $out = $TxtOutput.Text.Trim()
   if (-not $out -or $TxtOutput.Tag -ne "manual") {
     $out = if ($patchWimValid) {
+      # Derive output name from source WIM: same basename, today's date
       [System.IO.Path]::GetFileName($TxtPatchWim.Text) -replace '_\d{8}\.wim$', "_$(Get-Date -Format 'yyyyMMdd').wim"
     } else {
       Get-FilenamePreview -SelectedCodes $(if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $selCodes }) -BuildStr $Script:BuildString
@@ -1477,10 +1485,10 @@ function Build-CommandString {
 
   if ($patchWimValid)                                          { $cmd += " -PatchExistingWim `"$($TxtPatchWim.Text)`"" }
   if ($ChkSkipUpdates.Checked)                                 { $cmd += " -SkipUpdates" }
-  if ($ChkSkipLPs.Checked)                                     { $cmd += " -SkipLanguagePacks" }
+  if ($ChkSkipLPs.Checked -and -not $patchWimValid)           { $cmd += " -SkipLanguagePacks" }
   if ($ChkSkipAppx.Checked)                                    { $cmd += " -SkipAppxRemoval" }
-  # FoD selections
-  if ($FoDCheckboxes) {
+  # FoD selections — not applicable in patch mode
+  if ($FoDCheckboxes -and -not $patchWimValid) {
     $previewFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
     if ($previewFoDs.Count -gt 0) { $cmd += " -FoDList `"$($previewFoDs -join ',')`"" }
   }
@@ -1587,20 +1595,29 @@ $Script:RunClick = {
 
   # Build the full argument list for the main script
   $argList = @()
+  $patchWimValid = $ChkPatchMode.Checked -and
+                   $TxtPatchWim.Text -ne "Select existing WIM file..." -and
+                   $TxtPatchWim.Text -ne "" -and
+                   (Test-Path $TxtPatchWim.Text)
 
-  if ($data.SelectedCodes.Count -gt 0 -and -not $ChkSkipLPs.Checked) {
+  if ($data.SelectedCodes.Count -gt 0 -and -not $ChkSkipLPs.Checked -and -not $patchWimValid) {
   $langStr = $data.SelectedCodes -join ','
   $argList += "-Languages '$langStr'"
   }
 
   $src = $TxtSource.Text.Trim()
-  if ($src) { $argList += "-SourceFolder `"$src`"" }
+  if ($src -and -not $patchWimValid) { $argList += "-SourceFolder `"$src`"" }
 
   $out = $TxtOutput.Text.Trim()
   if (-not $out -or $TxtOutput.Tag -ne "manual") {
-    $previewCodes = if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $data.SelectedCodes }
-    $out = Get-FilenamePreview -SelectedCodes $previewCodes -BuildStr $Script:BuildString
-    $out = Join-Path "$ScriptRoot\Output" $out
+    if ($patchWimValid) {
+      $out = [System.IO.Path]::GetFileName($TxtPatchWim.Text) -replace '_\d{8}\.wim$', "_$(Get-Date -Format 'yyyyMMdd').wim"
+      $out = Join-Path "$ScriptRoot\Output" $out
+    } else {
+      $previewCodes = if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $data.SelectedCodes }
+      $out = Get-FilenamePreview -SelectedCodes $previewCodes -BuildStr $Script:BuildString
+      $out = Join-Path "$ScriptRoot\Output" $out
+    }
   }
   $argList += "-OutputPath `"$out`""
 
@@ -1635,13 +1652,15 @@ $Script:RunClick = {
   if ($ChkPatchMode.Checked -and $TxtPatchWim.Text -ne "Select existing WIM file..." -and (Test-Path $TxtPatchWim.Text)) {
     $argList += "-PatchExistingWim `"$($TxtPatchWim.Text)`""
   }
-  if ($ChkSkipUpdates.Checked)  { $argList += "-SkipUpdates" }
-  if ($ChkSkipLPs.Checked)      { $argList += "-SkipLanguagePacks" }
-  if ($ChkSkipAppx.Checked)     { $argList += "-SkipAppxRemoval" }
+  if ($ChkSkipUpdates.Checked)                       { $argList += "-SkipUpdates" }
+  if ($ChkSkipLPs.Checked -and -not $patchWimValid)  { $argList += "-SkipLanguagePacks" }
+  if ($ChkSkipAppx.Checked)                          { $argList += "-SkipAppxRemoval" }
 
-  # Pass selected FoD keys as comma-separated string
-  $selectedFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
-  if ($selectedFoDs.Count -gt 0) { $argList += "-FoDList `"$($selectedFoDs -join ',')`"" }
+  # Pass selected FoD keys as comma-separated string — not applicable in patch mode
+  if (-not $patchWimValid) {
+    $selectedFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
+    if ($selectedFoDs.Count -gt 0) { $argList += "-FoDList `"$($selectedFoDs -join ',')`"" }
+  }
 
   # Always unattended when launched from GUI - all choices already made in the interface
   $argList += "-Unattended"
