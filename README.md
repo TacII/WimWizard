@@ -171,6 +171,14 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 | `-SkipLanguagePacks` | Skip language pack injection |
 | `-SkipAppxRemoval` | Keep all inbox apps |
 | `-Unattended` | No interactive prompts — suitable for automation |
+| `-SCCMServer`	FQDN of the SCCM site server
+| `-SCCMSiteCode`	Three-character site code (e.g. `FC1`)
+| `-SCCMPackagePath`	UNC path where the WIM file will be stored
+| `-SCCMPackageName`	Package name (pre-rendered; use the GUI template builder for dynamic names)
+| `-SCCMVersion`	Version string for the OS Image package (optional)
+| `-SCCMComment`	Description for the OS Image package (optional)
+| `-SCCMPackageID`	Existing package to update — omit to create a new package
+| `-SCCMUpdateDPs`	Trigger a distribution point update after import
 | `-DebugBuild` | Extra diagnostics: full DISM output and pending package dumps in log |
 | `-Help` | Show help |
 
@@ -179,8 +187,8 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 
 | Component | Version |
 |-----------|---------|
-| WimWizard.ps1 | 5.1.0 |
-| WimWizard-GUI.ps1 | 1.9.1 |
+| WimWizard.ps1 | 5.2.2 |
+| WimWizard-GUI.ps1 | 2.4.33 |
 | Windows 11 target | 25H2 (26200.x) / 24H2 (26100.x) |
 
 ---
