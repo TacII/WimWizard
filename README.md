@@ -17,10 +17,11 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 ## Features
 
 - **Full image build** — Services a Windows 11 Enterprise WIM from a source ISO: language packs, FOD packages, cumulative updates (.NET, SafeOS/WinRE), and Appx removal
-- **Offline LCU on Windows 11 25H2 hosts** — 5.1.0 resolves the `0x800401e3`/`0x80070241` failure when building on a fully patched Windows 11 25H2 host. Uses `dism.exe /Add-Package` with the original SHA1-hashed filename from the Microsoft Update Catalog DownloadDialog API
+- **SCCM/MECM integration** — Automatically imports the finished WIM into SCCM as an OS Image package after a successful build. Supports creating new packages or updating an existing one by Package ID. Full CLI parameter support for scheduled tasks
 - **Microsoft-documented servicing sequence** — WinRE is patched before `install.wim`; LCU is applied twice (pass 1 SSU, pass 2 full) around language pack injection, following [Microsoft's media dynamic update sequence](https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update)
 - **Inbox app language fix** — Automatically generates and injects a RunOnce script into the Default User profile that reinstalls kept apps via winget at first user logon. This triggers the AppX framework to download the correct language satellites for the user's locale — no task sequence steps required
 - **Patch mode** — Patches an existing serviced WIM with the latest updates only, skipping ISO/LP steps. Ideal for monthly Patch Tuesday cycles
+- **GUI Patch WIM tab** — Patch an existing WIM directly from the GUI without rebuilding from ISO. Supports both SCCM-sourced WIMs (fetched by Package ID) and local WIM files. Handles the full SCCM round-trip: fetch → patch → copy back → update package → update DPs
 - **Automatic update download** — Downloads LCU, .NET and SafeOS updates directly from the Microsoft Update Catalog via [MSCatalogLTS](https://www.powershellgallery.com/packages/MSCatalogLTS/1.0.5). Already-downloaded KBs are reused automatically. LCU is downloaded via DownloadDialog API to preserve the original filename (including SHA1 hash) required by DISM
 - **Language pack injection** — Supports all 39 languages available in the Microsoft LP ISO, including LIPs and FOD packages. Language FODs are injected via `Add-WindowsCapability` with capability names
 - **Features on Demand** — Optional injection of .NET Framework 3.5, OpenSSH Server, RSAT tools, WordPad, and Windows Media Player. Configurable via GUI or `-FoDList` parameter
