@@ -14,19 +14,19 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.4.5
+  Version : 2.5.1
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
-  2.4.5  Fix: Image edition ComboBox now triggers command preview update on
+  2.5.1  Fix: Image edition ComboBox now triggers command preview update on
          selection change (Add_SelectedIndexChanged wired to Update-UI).
          Fix: Receive-Job result coerced to single string to prevent index
          list from leaking into $Script:EditionTag. Where-Object on
          ComboBox.Items replaced with explicit foreach loop.
          Help tab updated with Image edition documentation and -WimIndex
          standalone example. WimWizard.ps1 -WimIndex help text expanded.
-  2.4.4  New: Edition/image index selector on Options tab, between Build
+  2.5.0  New: Edition/image index selector on Options tab, between Build
          Architecture and Output WIM filename. Populated from WIM index
          list after ISO probe; defaults to Windows 11 Enterprise. Passes
          -WimIndex to WimWizard.ps1 when a non-Enterprise edition is
