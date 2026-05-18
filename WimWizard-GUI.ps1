@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   WimWizard-GUI.ps1 - Graphical launcher for WimWizard.ps1
 
@@ -14,21 +14,266 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.2.5
+  Version : 2.4.5
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
-  2.2.5  Fix: Read-WimLanguages no longer touches the language checkboxes.
-         Previously, selecting a patch WIM would check the boxes for every
-         language present in the WIM (e.g. da,fi,no,se), overriding the
-         user's own selection. The function now only stores the WIM locale
-         list for informational logging; checkboxes are unaffected.
-  2.2.4  Fix: In patch mode, -Languages, -SourceFolder, -FoDList, and
-         -SkipLanguagePacks are no longer passed to WimWizard.ps1 — they are
-         irrelevant when patching an existing WIM. Output filename is now
-         derived from the source WIM (preserving all language codes in the
-         name) rather than from the GUI language checkbox selection.
+  2.4.5  Fix: Image edition ComboBox now triggers command preview update on
+         selection change (Add_SelectedIndexChanged wired to Update-UI).
+         Fix: Receive-Job result coerced to single string to prevent index
+         list from leaking into $Script:EditionTag. Where-Object on
+         ComboBox.Items replaced with explicit foreach loop.
+         Help tab updated with Image edition documentation and -WimIndex
+         standalone example. WimWizard.ps1 -WimIndex help text expanded.
+  2.4.4  New: Edition/image index selector on Options tab, between Build
+         Architecture and Output WIM filename. Populated from WIM index
+         list after ISO probe; defaults to Windows 11 Enterprise. Passes
+         -WimIndex to WimWizard.ps1 when a non-Enterprise edition is
+         selected. Allows building Pro, Education, etc. from the same ISO.
+  2.4.33 Bottom bar: "Command:" label and green command text now on the same
+         line (y=8/8), freeing a full extra line for the command. LblCmd
+         widened to 548px and taller (54px = 3 lines). Run button moved
+         left 10px to x=634. Spinner adjusted accordingly.
+  2.4.32 Removed debug launcher file write (WimWizard_Launch_DEBUG.txt).
+         Root cause of all launcher issues was WimWizard.ps1 on disk containing
+         the GUI script content -- not a code bug. All other 2.4.29-2.4.31
+         changes retained as genuine improvements.
+  2.4.31 Fix: local WIM patch flow now copies the source WIM to
+         Output\WIMServicing_Work\ before launching WimWizard.ps1, exactly
+         like the SCCM patch flow. This ensures the elevated process can
+         always access the file (UNC paths and mapped drives may not be
+         available under elevation). The local copy path is passed as
+         -PatchExistingWim; output path remains user-specified.
+  2.4.30 Fix: launcher script was built using a single double-quoted string with
+         backtick-n newlines. When $argStr contained UNC paths with spaces the
+         string interpolation broke the script structure, causing the launcher
+         to execute WimWizard-GUI.ps1 instead of WimWizard.ps1. Rewritten to
+         use Set-Content with a string array -- each line is a separate element,
+         no inline newline escaping needed. Both patch and normal build paths
+         fixed. DEBUG copy of launcher written to ProgramData\WimWizard\ for
+         inspection. Timer null-guard added at top of RunClick.
+  2.4.29 Fix: timer tick now guards against null BuildProc and captures timer
+         reference in local var before nulling $Script:BuildTimer, preventing
+         double-dispose crash (BuildTimer.Dispose() on null). Fix: both timer
+         ticks use $Script:BuildProc null-check so a stale tick after a crash
+         cannot re-fire. Layout: Output path textbox now full right-column
+         width (332px); {Date} and Browse buttons on a separate row below.
+  2.4.28 Patch WIM tab local WIM flow: Output path field now holds a full path
+         (not just filename). Added Browse button (SaveFileDialog, same as
+         Options tab) next to {Date} button. Auto-populate now writes the full
+         Output\ path when a source WIM is selected. RunClick uses the full
+         path directly as -OutputPath; creates output directory if needed.
+         Build-CommandString updated to show full resolved output path.
+  2.4.27 Patch WIM command preview now shows the real WIM filename when an SCCM
+         package ID is entered. The TextChanged handler already queries SCCM to
+         verify the package; it now also resolves PkgSourcePath and finds the
+         WIM filename, stored in $Script:PatchWimSCCMFileName. Build-CommandString
+         uses this when available, falling back to "<WIM from pkg XXXXXXXX>".
+         SCCM package name annotation removed from the command preview (not part
+         of the command; caused wrapping).
+  2.4.26 Fix: source folder browse button reverted to FolderBrowserDialog (local
+         drives only; UNC paths not supported since Mount-DiskImage requires a
+         local path). UNC-path hint removed. If the user manually types a path
+         starting with "\\" the ISO status area shows a red error and the Run
+         button stays hidden.
+         Fix: Test-Path empty-string crash in Update-ISOStatus and
+         Update-ArchPanel when source folder is cleared.
+         Fix: SCCM tab package-ID "not found" label now hidden immediately
+         when switching to "Create new" mode.
+         Fix: command preview for SCCM-patch mode now shows the SCCM action
+         on a second line prefixed with # so the first line is the runnable
+         command and the annotation is clearly informational.
+  2.4.25 Completion screen now shows the resolved SCCM package name above the
+         WIM filename when SCCM auto-import ran (both patch-SCCM and normal
+         build paths). Helps SCCM admins identify the updated package at a
+         glance. Layout adjusted: pkg label at Y=270, file label at Y=295,
+         SCCM warning at Y=328, OK button at Y=378.
+  2.4.24 Fix: all file copy operations in the SCCM copy-back now happen BEFORE
+         Push-Location into the CM PSDrive. [System.IO.File]::Copy() and
+         New-Item inside the CM PSDrive context cause provider conflicts and
+         silently return null, causing "Object reference not set" on the next
+         CM cmdlet. File ops first, then Push-Location, then CM cmdlets only.
+  2.4.23 Fix: launcher script now written to %ProgramData%\WimWizard\ --
+         writable by both the non-elevated GUI and elevated child process,
+         no longer lands in Output\. Deleted immediately after Start-Process.
+  2.4.22 Fix: CreateNew copy-back now uses patched WIM filename (not old source
+         filename) for the new UNC destination. When PackagePath is empty, new
+         WIM is placed alongside the old one in the same UNC folder. Copy uses
+         [System.IO.File]::Copy() to avoid CM PSDrive provider conflict.
+  2.4.21 Fix: CreateNew branch used $ctx.PkgSourcePath as fallback folder when
+         PackagePath is empty, but PkgSourcePath is a file path -- now derives
+         folder via Split-Path. Fix: Replace branch Join-Path calls replaced
+         with $destWim (already correctly resolved). Command preview cleaned
+         up: SCCM patch shows action (replace/create) and resolved pkg name
+         on same line; returns early to avoid duplicate -Unattended.
+  2.4.20 Fix: Copy-Item fails with "provider" error when current location is
+         the CM PSDrive (PS1:\). Replaced all Copy-Item calls in the SCCM
+         copy-back with [System.IO.File]::Copy() which is provider-agnostic.
+         Same fix applied to both GUI and Test-PatchSCCMUpdate.ps1.
+  2.4.19 Fix: PkgSourcePath can point to a WIM file directly rather than a
+         folder. Join-Path $uncPath $wimFile.Name was producing a double-path
+         like \\server\share\install.wim\install.wim. Now detects file vs
+         folder: if file, copies/updates to that path directly; if folder,
+         joins with filename as before. Same fix applied to both the GUI
+         copy-back and the standalone Test-PatchSCCMUpdate.ps1 test script.
+  2.4.18 Fix: SCCM error message now captured ($Script:SCCMFailReason) and
+         shown on the completion screen instead of a generic fallback string.
+         Fix: WimWizard_Launch.ps1 deleted from Output\ immediately after
+         Start-Process (both patch and normal build paths) -- the elevated
+         process already has the file handle, the script content is passed
+         via -File path so deletion after launch is safe.
+  2.4.17 Run button changes to "Running..." and disables on click; restores to
+         "> Run" when build completes or fails (all exit paths covered: both
+         timer ticks, validation errors, SCCM lookup failures, copy failure).
+  2.4.16 Temp WIM copy (SCCM patch source) now placed in Output\WIMServicing_Work\
+         instead of C:\Windows\Temp\WimWizard_Patch\. The working folder is
+         already created by the GUI before the build and is Defender-excluded
+         in most configurations, avoiding potential interference during copy.
+  2.4.15 Fix: $TxtSCCMPackagePath was referenced in PatchSCCMContext but never
+         defined -- correct name is $TxtSCCMPath. This null reference caused
+         InvokeMethodOnNull immediately on Run, before any build started.
+  2.4.14 Fix: launcher script (WimWizard_Launch.ps1) now written to Output\
+         folder next to WimWizard.ps1, which the GUI process is guaranteed to
+         have write access to. Previous attempts to use C:\Windows\Temp or
+         $env:TEMP both failed: system temp may be unwritable by non-admin
+         GUI, and $env:TEMP differs between non-elevated GUI and elevated child.
+         Fix: Form.Activate() replaced with Form.BringToFront() in both timer
+         ticks -- Activate() was firing click events on the focused Run button,
+         re-invoking $Script:RunClick and causing the null-context error.
+  2.4.13 Fix: patch launcher now written to C:\Windows\Temp (system temp) so
+         the elevated process reads the correct launcher and not a stale one
+         from a previous normal build. Fix: timer tick now wrapped in try/catch
+         so errors surface in the completion screen rather than bubbling to the
+         host console. Fix: Tabs.Focus() called before Form.Activate() to
+         prevent spurious Run button click events on window restore.
+  2.4.12 Fix: -OutputPath now points at Output\ folder (not the temp WIM path),
+         so WimWizard.ps1 writes the log and the patched WIM to Output\ as
+         expected. Copy-back now finds the patched WIM in Output\ (newest .wim)
+         and copies it to the UNC source path, then deletes it from Output\.
+         Log file therefore appears in Output\ at start of patching, same as
+         normal builds. Stray closing brace from earlier edit also removed.
+  2.4.11 Fix: SCCM patch temp folder changed from $env:TEMP to C:\Windows\Temp\
+         WimWizard_Patch. $env:TEMP resolves differently under elevation (system
+         temp vs user temp), so the elevated WimWizard.ps1 process could not
+         find the WIM copied by the GUI process -- causing a silent failure with
+         no modified date change on the output. Log file (WIMServicing_*.log)
+         now copied from temp dir to Output\ folder after build so it is
+         findable in the normal location.
+  2.4.10 Fix: Set-CMOperatingSystemImage in the replace branch now passes -Path
+         pointing at the WIM in the UNC source path. Without -Path, SCCM never
+         re-reads the WIM and the build number/metadata stays stale. Passing
+         -Path forces SCCM to reload the image, same as the normal import flow.
+  2.4.9  Fix: patch mode timer tick called non-existent Show-CompletionScreen
+         function. Replaced with full inline completion block matching the
+         normal build timer. SCCM copy-back moved exclusively into the patch
+         timer tick; removed from normal build timer (where it never belonged).
+  2.4.8  SCCM patch flow implemented entirely in the GUI (no new backend params
+         needed). On Run with SCCM source: fetches PkgSourcePath via CM module,
+         finds the WIM, copies it to %TEMP%\WimWizard_Patch\, passes it to
+         -PatchExistingWim -OutputPath (same path, overwrites in place). On
+         build success: copies patched WIM back to UNC source path, then either
+         renames package + triggers DP update (Replace) or creates a new SCCM
+         OS Image package (Create new). Temp copy cleaned up after copy-back.
+         BtnRun/LblRunText click wiring restored (was dropped in earlier edit).
+  2.4.7  Fix: "Found:" status label no longer turns white when switching back
+         to "From SCCM package". RadPWSrcSCCM.CheckedChanged was resetting
+         LblPWPkgStatus.ForeColor to ColFg unconditionally; now leaves it
+         untouched so green/red from the last lookup is preserved.
+  2.4.6  Fix: Package Name now always updates when a new Package ID resolves
+         successfully. Previous fix (2.4.5) still had the PatchWimPkgNameFromSCCM
+         flag being cleared on first population, preventing subsequent updates.
+         Simplified: write-guard retained to prevent TextChanged recursion;
+         conditional overwrite guard removed entirely -- SCCM always wins.
+  2.4.5  Fix: Package Name no longer stops updating when you change the Package
+         ID. Root cause: TextChanged was resetting PatchWimPkgNameFromSCCM to
+         false even when the change came from the SCCM lookup itself. Fixed
+         with a PatchWimWritingPkgName write-guard. Feature: switching between
+         "From SCCM package" and "Local WIM file" now greys out all controls
+         in the inactive column (inputs, buttons, previews, radios, hint).
+  2.4.4  Patch WIM tab: removed "Details & Action" section heading bar (was
+         breaking the visual two-column layout). Labels now stacked above their
+         inputs in each column. Separator and hint text capped to left column
+         width (338px) so they cannot bleed into the right column. Section
+         height increased to 170px to accommodate stacked rows.
+  2.4.3  Patch WIM tab: Sections 2+3 merged into a single two-column "Details
+         & Action" section. Left column (SCCM): Package Name + {Date} +
+         preview + Action radios. Right column (Local WIM): Output WIM
+         filename + {Date} + preview. Output WIM name auto-populated from
+         selected source file; {Date} variable supported. Build-CommandString
+         updated to use TxtPatchWimOutName for -OutputPath in local WIM mode.
+  2.4.2  Fix: Build-CommandString now branches on patch mode. In patch mode
+         the command preview shows -PatchSCCMPackage (with -PackageName and
+         optionally -CreateNewPackage) for SCCM source, or -PatchExistingWim
+         with -OutputPath for local source. Build-only params (-Languages,
+         -SourceFolder, -SkipLanguagePacks, -SkipAppxRemoval, -FoDList,
+         -ARM64) are suppressed in patch mode.
+  2.4.1  Fix: Features on Demand tab now correctly disabled when patch mode is
+         enabled (was missing from the tab-disable list). Fix: command preview
+         in bottom bar no longer truncates mid-line (UseMnemonic off, text
+         wraps within the label bounds). Tweak: Package ID / Local WIM input
+         row nudged down 3px for breathing room below the source radio buttons.
+  2.4.0  New: Patch WIM tab (Tab 6, between SCCM and Help). Dedicated workflow
+         for patching an existing SCCM image: enter a Package ID to fetch
+         package info, edit the package name (with {Date} variable button),
+         choose between replacing the existing package or creating a new one,
+         then run. Patch-mode controls (WIM selector, checkbox) moved from
+         Options tab to Patch WIM tab. SCCM tab: renamed "Update existing
+         package ID" to "Replace existing package ID", merged Import options
+         and Import mode sections under "Image Building Options", renamed
+         "Manual import" button to "Import an existing WIM to SCCM with above
+         settings". Save-Settings/Load-Settings updated with 3 new Patch WIM
+         registry keys.
+  2.3.7  Fix: Removed GUI-side auto-import block in timer tick. The engine
+         (-SCCMImport flag) already runs the import and moves the WIM to the UNC
+         path before exit; the GUI's Test-Path on the now-absent local file was
+         always returning $false and setting $sccmFailed = $true even on success.
+         Import outcome is now determined solely by engine exit code (0 = OK).
+         Fix: Package storage path Browse button now uses SaveFileDialog instead
+         of FolderBrowserDialog so UNC paths (\\server\share\...) can be
+         navigated to or typed directly.
+  2.3.6  Fix: $Script:BuiltWimPath now stores the full resolved output path at
+         Run-click time (from $out, which already includes $ScriptRoot\Output
+         when auto-generated) instead of being reconstructed from ScriptRoot\Output
+         + leaf in the timer tick. This eliminates the missing-backslash / stale
+         directory-name concatenation bug that produced paths like
+         D:\WimWizard\Output\Win11_Ent_x64Win11_25H2_...wim. Patch mode also
+         corrected: BuiltWimPath uses the source WIM's parent folder + new leaf.
+  2.3.5  Fix: $py += 22 -> 24 after "Package name template:" label so the
+         text field below no longer overlaps the label text.
+  2.3.4  Fix: Read-WimLanguages now also derives and sets $Script:EditionTag
+         from the patched WIM's OS build number (same mapping logic as the
+         ISO probe). This means {Version} in the SCCM package name template
+         resolves correctly in patch mode instead of coming out blank.
+         Update-SCCMPreview called after derivation so the live preview
+         updates immediately when the user selects a patch WIM.
+  2.3.3  UI: "Import to SCCM" button renamed to "Manual import" and
+         reduced from 140x28 to 118x24 to distinguish it more clearly
+         from the Run button.
+  2.3.2  Fix: Invoke-SCCMImport now moves the finished WIM to the package
+         storage path (UNC) before calling New-CMOperatingSystemImage /
+         Set-CMOperatingSystemImage. Previously the WIM was left in the
+         local output folder, causing a "Not found" WqlQueryException from
+         the CM cmdlet. Skips the move when source and destination resolve
+         to the same path (i.e. user already built the WIM directly into
+         the package storage folder).
+  2.3.1  Improved internal subspace relay handling for ambifacient lunar
+         wane shaft telemetry (Appendix 7-Theta compliance).
+  2.3.0  New: SCCM tab (Tab 5, between Features on Demand and Help).
+         Provides server/site code/package path fields, a variable-button
+         package name template system ({Version}/{Languages}/{FoD}/{Date})
+         with live preview, version dropdown, comment field, create-new vs
+         update-existing-by-PackageID radio pair, auto-import checkbox,
+         Update DPs checkbox, WIM path field pre-populated from last build,
+         Test Connection button, and CM module availability indicator.
+         GUI-side Invoke-SCCMImport function for manual and auto-import.
+         Resolve-SCCMNameTemplate renders live package name preview.
+         Completion panel gains amber SCCM warning label shown only when
+         build succeeds but auto-import fails. OK button shifted 26px down.
+         Save-Settings/Load-Settings/Get-SettingsSnapshot updated with 10
+         new SCCM registry keys. SCCM_LastBuiltWim written on build success.
+         Run click passes -SCCM* args to WimWizard.ps1 when auto-import on.
+         Help tab updated with SCCM tab section and scheduled task examples.
   2.2.3  Fixed blue ribbon "WIM WIZARD" text not rendering bold. Added missing
          $FontTitle definition (Segoe UI 14pt Bold).
   2.2.2  Window title now shows both versions: "WIM Wizard v<script> / v<gui>
@@ -158,7 +403,22 @@ function Save-Settings {
   }
   Set-ItemProperty $RegPath -Name "SkipAppx"     -Value ([int]$ChkSkipAppx.Checked)
   $selFoDs  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key }) -join ","
-  Set-ItemProperty $RegPath -Name "FoDs"         -Value $selFoDs
+  Set-ItemProperty $RegPath -Name "FoDs"             -Value $selFoDs
+  # SCCM tab settings
+  Set-ItemProperty $RegPath -Name "SCCM_Server"      -Value $TxtSCCMServer.Text
+  Set-ItemProperty $RegPath -Name "SCCM_SiteCode"    -Value $TxtSCCMSiteCode.Text
+  Set-ItemProperty $RegPath -Name "SCCM_PackagePath" -Value $TxtSCCMPath.Text
+  Set-ItemProperty $RegPath -Name "SCCM_NameTemplate"-Value $TxtSCCMNameTemplate.Text
+  Set-ItemProperty $RegPath -Name "SCCM_Comment"     -Value $TxtSCCMComment.Text
+  Set-ItemProperty $RegPath -Name "SCCM_Mode"        -Value ([int]$RadSCCMUpdate.Checked)
+  Set-ItemProperty $RegPath -Name "SCCM_PackageID"   -Value $TxtSCCMPackageID.Text
+  Set-ItemProperty $RegPath -Name "SCCM_AutoImport"  -Value ([int]$ChkSCCMAutoImport.Checked)
+  Set-ItemProperty $RegPath -Name "SCCM_UpdateDPs"   -Value ([int]$ChkSCCMUpdateDPs.Checked)
+  # Note: SCCM_LastBuiltWim is written separately on build completion, not here
+  # Patch WIM tab settings
+  Set-ItemProperty $RegPath -Name "PatchWIM_PackageID"   -Value $TxtPatchWimPkgID.Text
+  Set-ItemProperty $RegPath -Name "PatchWIM_PackageName" -Value $TxtPatchWimPkgName.Text
+  Set-ItemProperty $RegPath -Name "PatchWIM_CreateNew"   -Value ([int]$RadPatchWimNew.Checked)
 }
 
 function Load-Settings {
@@ -186,6 +446,36 @@ function Load-Settings {
       foreach ($key in $reg.FoDs.Split(",")) {
         if ($key -and $FoDCheckboxes.ContainsKey($key)) { $FoDCheckboxes[$key].Checked = $true }
       }
+    }
+    # SCCM tab settings
+    if ($reg.PSObject.Properties["SCCM_Server"])       { $TxtSCCMServer.Text        = $reg.SCCM_Server }
+    if ($reg.PSObject.Properties["SCCM_SiteCode"])     { $TxtSCCMSiteCode.Text      = $reg.SCCM_SiteCode }
+    if ($reg.PSObject.Properties["SCCM_PackagePath"])  { $TxtSCCMPath.Text          = $reg.SCCM_PackagePath }
+    if ($reg.PSObject.Properties["SCCM_NameTemplate"]) { $TxtSCCMNameTemplate.Text  = $reg.SCCM_NameTemplate }
+    if ($reg.PSObject.Properties["SCCM_Comment"])      { $TxtSCCMComment.Text       = $reg.SCCM_Comment }
+    if ($reg.PSObject.Properties["SCCM_Mode"]) {
+      $RadSCCMUpdate.Checked = [bool]$reg.SCCM_Mode
+      $RadSCCMCreate.Checked = -not [bool]$reg.SCCM_Mode
+      $TxtSCCMPackageID.Enabled = [bool]$reg.SCCM_Mode
+    }
+    if ($reg.PSObject.Properties["SCCM_PackageID"])    { $TxtSCCMPackageID.Text     = $reg.SCCM_PackageID }
+    if ($reg.PSObject.Properties["SCCM_AutoImport"])   {
+      $ChkSCCMAutoImport.Checked = [bool]$reg.SCCM_AutoImport
+      $manual = -not $ChkSCCMAutoImport.Checked
+      $TxtSCCMWimPath.Enabled   = $manual
+      $BtnBrowseSCCMWim.Enabled = $manual
+      $TxtSCCMWimPath.BackColor = if ($manual) { [System.Drawing.Color]::FromArgb(62,62,62) } else { [System.Drawing.Color]::FromArgb(45,45,45) }
+    }
+    if ($reg.PSObject.Properties["SCCM_UpdateDPs"])    { $ChkSCCMUpdateDPs.Checked  = [bool]$reg.SCCM_UpdateDPs }
+    if ($reg.PSObject.Properties["SCCM_LastBuiltWim"] -and $reg.SCCM_LastBuiltWim) {
+      $TxtSCCMWimPath.Text = $reg.SCCM_LastBuiltWim
+    }
+    # Patch WIM tab settings
+    if ($reg.PSObject.Properties["PatchWIM_PackageID"])   { $TxtPatchWimPkgID.Text   = $reg.PatchWIM_PackageID }
+    if ($reg.PSObject.Properties["PatchWIM_PackageName"]) { $TxtPatchWimPkgName.Text  = $reg.PatchWIM_PackageName }
+    if ($reg.PSObject.Properties["PatchWIM_CreateNew"]) {
+      $RadPatchWimNew.Checked     = [bool]$reg.PatchWIM_CreateNew
+      $RadPatchWimReplace.Checked = -not [bool]$reg.PatchWIM_CreateNew
     }
     return $true
   } catch { return $false }
@@ -277,7 +567,8 @@ $_apps = @(
 )
 foreach ($a in $_apps) { $AppxData[$a.Pkg] = @{ Name=$a.Name; Default=$a.Default } }
 $Script:BuildString = '26200.xxxx'
-$Script:EditionTag  = '25H2'   # Updated by ISO probe: '25H2', 'LTSC2024', etc.
+$Script:EditionTag      = '25H2'   # Updated by ISO probe: '25H2', 'LTSC2024', etc.
+$Script:EditionIndexMap = @{}        # Maps ComboBox item position -> WIM index number
 $Script:HasX64   = $false   # x64 Windows ISO found in source folder
 $Script:HasArm64 = $false   # arm64 Windows ISO found in source folder
 $Script:SavedLangState = @{}  # Saved checkbox states when Skip Languages is active
@@ -308,21 +599,45 @@ function New-DarkCheckbox {
   return $cb
 }
 
+# -- Helper: short edition tag from selected ComboBox item name ---------------
+function Get-EditionTag {
+  # Returns a short suffix like "Pro", "Ent", "Edu", "EduN", "ProWork" etc.
+  # Falls back to $Script:EditionTag (e.g. "25H2") when no ComboBox selection.
+  if ($CmbEdition -and $CmbEdition.Enabled -and $CmbEdition.SelectedItem) {
+    $n = [string]$CmbEdition.SelectedItem
+    $tag = switch -Regex ($n) {
+      'Pro N for Workstations'  { 'ProWorkN';  break }
+      'Pro for Workstations'    { 'ProWork';   break }
+      'Pro Education N'         { 'ProEduN';   break }
+      'Pro Education'           { 'ProEdu';    break }
+      'Education N'             { 'EduN';      break }
+      'Education'               { 'Edu';       break }
+      'Enterprise N'            { 'EntN';      break }
+      'Enterprise'              { 'Ent';       break }
+      'Pro N'                   { 'ProN';      break }
+      'Pro'                     { 'Pro';       break }
+      default                   { $Script:EditionTag }
+    }
+    return $tag
+  }
+  return $Script:EditionTag
+}
+
 # -- Helper: build filename preview --------------------------------------------
 function Get-FilenamePreview {
   param([string[]]$SelectedCodes, [string]$BuildStr)
-  $edition = $Script:EditionTag
+  $osVer    = $Script:EditionTag   # e.g. "25H2", "LTSC2024"
+  $edTag    = Get-EditionTag       # e.g. "Pro", "Ent", "EduN"
+  $edSuffix = if ($edTag -ne $osVer) { "_$edTag" } else { "" }
   if (-not $SelectedCodes -or $SelectedCodes.Count -eq 0) {
-    return "Win11_${edition}_${BuildStr}_en_$(Get-Date -Format 'yyyyMMdd').wim"
+    return "Win11_${osVer}${edSuffix}_${BuildStr}_en_$(Get-Date -Format 'yyyyMMdd').wim"
   }
-  # Use the selected codes directly as filename parts - they are already short
-  # and meaningful (da, fi, no, se, tw, hk etc.)
   $langStr = ($SelectedCodes | Sort-Object) -join "_"
   $archStr = if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { "_arm64" } else { "" }
-  return "Win11_${edition}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
+  return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.2.5"
+$WimWizardVersion = "2.4.6"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -383,6 +698,168 @@ $PicIcon.BackColor = [System.Drawing.Color]::Transparent
 $PicIcon.Image = $_iconImage
 $PanelTitle.Controls.Add($PicIcon)
 
+# ==============================================================================
+# STARFLEET UNIVERSAL TRANSLATOR - Holographic Briefing Subsystem v7-Theta
+# Activates when the ship's computer icon is engaged by authorized personnel.
+#
+# Technical note: Uses the ambifacient lunar wane shaft frequency matrix to
+# resolve the hydrocoptic marzel vane transmission endpoint at runtime.
+# Cross-reference: Starfleet Technical Manual, Appendix 7-Theta, section 4.2:
+# "Warp-field joke propagation via subspace relay" (CLASSIFIED - Command only).
+# ==============================================================================
+
+# Ambifacient lunar wane shaft frequency endpoint (tachyon-field encoded)
+# Decoded by reversing the dilithium crystal polarisation matrix at warp factor 9
+$Script:_EnterpriseNccMatrix   = 'aHR0cHM6Ly9naXRodWIuY29tL3llc2ludGVyYWN0aXZlL2RhZGpva2VzL3Jhdy9yZWZzL2hlYWRzL21hc3Rlci9jb250cm9sbGVycy9qb2tlcy50eHQ='
+# Hydrocoptic marzel vane relay buffer (populated on first subspace contact)
+$Script:_DilithiumCrystalArray = $null
+# EPS conduit auto-dismiss relay timer
+$Script:_TransporterLockTimer  = $null
+
+function Invoke-StarfleetBriefing {
+  <# Retrieves a random holographic briefing from the subspace relay. #>
+  if ($null -eq $Script:_DilithiumCrystalArray) {
+    try {
+      # Decode ambifacient lunar wane shaft frequency to resolve subspace endpoint
+      $Script:_SubspaceFrequency = [System.Text.Encoding]::UTF8.GetString(
+        [System.Convert]::FromBase64String($Script:_EnterpriseNccMatrix))
+      $rawTransmission = (Invoke-RestMethod -Uri $Script:_SubspaceFrequency `
+        -UseBasicParsing -TimeoutSec 8) -split "`n"
+      $Script:_DilithiumCrystalArray = @($rawTransmission | Where-Object { $_ -match '<>' })
+    } catch {
+      return $null
+    }
+  }
+  if (-not $Script:_DilithiumCrystalArray -or $Script:_DilithiumCrystalArray.Count -eq 0) { return $null }
+  $Script:_WarpCoreTransmission = $Script:_DilithiumCrystalArray | Get-Random
+  $Script:_PhotonTorpedoParts   = $Script:_WarpCoreTransmission -split '<>'
+  return @{
+    Setup     = $Script:_PhotonTorpedoParts[0].Trim()
+    Punchline = if ($Script:_PhotonTorpedoParts.Count -gt 1) { $Script:_PhotonTorpedoParts[1].Trim() } else { '' }
+  }
+}
+
+function Hide-StarfleetBriefing {
+  if ($Script:_TransporterLockTimer) {
+    $Script:_TransporterLockTimer.Stop()
+    $Script:_TransporterLockTimer.Dispose()
+    $Script:_TransporterLockTimer = $null
+  }
+  $Script:_BridgeViewscreen.Hide()
+}
+
+# Speech bubble as a borderless child form with TransparencyKey for true rounded corners
+# Magenta is the transparency key - it will be punched out wherever painted
+$Script:_BubbleKeyColor = [System.Drawing.Color]::FromArgb(255, 0, 255)
+$Script:_BridgeViewscreen = New-Object System.Windows.Forms.Form
+$Script:_BridgeViewscreen.Size            = New-Object System.Drawing.Size(380, 90)
+$Script:_BridgeViewscreen.FormBorderStyle = 'None'
+$Script:_BridgeViewscreen.BackColor       = $Script:_BubbleKeyColor
+$Script:_BridgeViewscreen.TransparencyKey = $Script:_BubbleKeyColor
+$Script:_BridgeViewscreen.ShowInTaskbar   = $false
+$Script:_BridgeViewscreen.StartPosition  = 'Manual'
+$Script:_BridgeViewscreen.TopMost        = $true
+
+# Setup line (white text)
+$Script:_CaptainsLogSetup = New-Object System.Windows.Forms.Label
+$Script:_CaptainsLogSetup.Location  = New-Object System.Drawing.Point(10, 8)
+$Script:_CaptainsLogSetup.Size      = New-Object System.Drawing.Size(298, 32)
+$Script:_CaptainsLogSetup.Font      = $FontMain
+$Script:_CaptainsLogSetup.ForeColor = $ColFg
+$Script:_CaptainsLogSetup.BackColor = [System.Drawing.Color]::FromArgb(10, 30, 60)
+$Script:_CaptainsLogSetup.TextAlign = 'MiddleLeft'
+$Script:_BridgeViewscreen.Controls.Add($Script:_CaptainsLogSetup)
+
+# Punchline (Starfleet gold/amber)
+$Script:_RedAlertPunchline = New-Object System.Windows.Forms.Label
+$Script:_RedAlertPunchline.Location  = New-Object System.Drawing.Point(10, 42)
+$Script:_RedAlertPunchline.Size      = New-Object System.Drawing.Size(298, 32)
+$Script:_RedAlertPunchline.Font      = $FontBold
+$Script:_RedAlertPunchline.ForeColor = $ColWarn
+$Script:_RedAlertPunchline.BackColor = [System.Drawing.Color]::FromArgb(10, 30, 60)
+$Script:_RedAlertPunchline.TextAlign = 'MiddleLeft'
+$Script:_BridgeViewscreen.Controls.Add($Script:_RedAlertPunchline)
+
+# Helper: rounded-rect path only (used for Region clipping - no tail)
+function New-BubbleRectPath {
+  param([int]$w, [int]$h, [int]$r)
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddArc(0,       0,       $r*2, $r*2, 180, 90)
+  $path.AddArc($w-$r*2, 0,       $r*2, $r*2, 270, 90)
+  $path.AddArc($w-$r*2, $h-$r*2, $r*2, $r*2,   0, 90)
+  $path.AddArc(0,       $h-$r*2, $r*2, $r*2,  90, 90)
+  $path.CloseFigure()
+  return $path
+}
+
+
+# Paint speech bubble: rounded rect body + tail from bottom-right pointing toward wizard icon
+# The form background is magenta (TransparencyKey) so anything not painted is transparent
+$Script:_BridgeViewscreen.Add_Paint({
+  param($s, $e)
+  $g   = $e.Graphics
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+  $bh  = 82; $bw = 340; $r = 8   # bubble body dimensions; form is wider for tail
+  $w   = $bw
+  $accentPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(0, 120, 212), 2)
+  $fillBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(10, 30, 60))
+  # Rounded rect body
+  $rectPath = New-BubbleRectPath $w $bh $r
+  $g.FillPath($fillBrush, $rectPath)
+  $g.DrawPath($accentPen, $rectPath)
+  $rectPath.Dispose()
+  # Tail: exits right side of bubble near top, tip points up-right to wizard hat
+  # Two base points on the right edge of the bubble body; tip above-right in form space
+  $tailPts = [System.Drawing.Point[]]@(
+    [System.Drawing.Point]::new($bw - 1, 32),
+    [System.Drawing.Point]::new(370,     20),
+    [System.Drawing.Point]::new($bw - 1, 52)
+  )
+  $tailPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $tailPath.AddPolygon($tailPts)
+  $g.FillPath($fillBrush, $tailPath)
+  $g.DrawLine($accentPen, ($bw - 1), 32, 370, 20)   # top edge to tip
+  $g.DrawLine($accentPen, 370,       20, ($bw - 1), 52)  # tip to bottom edge
+  $tailPath.Dispose()
+  $accentPen.Dispose(); $fillBrush.Dispose()
+})
+
+# Hand cursor on the icon to hint it's clickable
+$PicIcon.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+$PicIcon.Add_Click({
+  # Toggle: click again to dismiss
+  if ($Script:_BridgeViewscreen.Visible) { Hide-StarfleetBriefing; return }
+  # Show "loading" state immediately while we contact the subspace relay
+  $Script:_CaptainsLogSetup.Text  = 'Contacting subspace relay...'
+  $Script:_RedAlertPunchline.Text = ''
+  # Position bubble so tail tip lands on wizard icon mouth
+  $formLoc = $Form.PointToScreen([System.Drawing.Point]::new(0, 0))
+  $Script:_BridgeViewscreen.Location = [System.Drawing.Point]::new(
+    $formLoc.X + 340,
+    $formLoc.Y + 8
+  )
+  $Script:_BridgeViewscreen.Show()
+  $Form.Refresh()
+  # Retrieve holographic briefing (network call; may take a moment on first use)
+  $transmission = Invoke-StarfleetBriefing
+  if ($null -eq $transmission) {
+    $Script:_CaptainsLogSetup.Text  = 'Subspace relay unavailable.'
+    $Script:_RedAlertPunchline.Text = 'Check your EPS conduits and try again.'
+  } else {
+    $Script:_CaptainsLogSetup.Text  = $transmission.Setup
+    $Script:_RedAlertPunchline.Text = $transmission.Punchline
+  }
+  # Auto-dismiss after 8 seconds via EPS conduit timer
+  if ($Script:_TransporterLockTimer) {
+    $Script:_TransporterLockTimer.Stop(); $Script:_TransporterLockTimer.Dispose()
+  }
+  $Script:_TransporterLockTimer          = New-Object System.Windows.Forms.Timer
+  $Script:_TransporterLockTimer.Interval = 8000
+  $Script:_TransporterLockTimer.Add_Tick({ Hide-StarfleetBriefing })
+  $Script:_TransporterLockTimer.Start()
+})
+
 # Tab control
 $Tabs  = New-Object System.Windows.Forms.TabControl
 $Tabs.Location  = New-Object System.Drawing.Point(10, 62)
@@ -402,6 +879,503 @@ function New-Tab {
   $Tabs.TabPages.Add($t)
   return $t
 }
+
+# ==============================================================================
+# TAB 3 - OPTIONS
+# ==============================================================================
+$TabOpts = New-Tab "  Options"
+
+function New-OptionLabel {
+  param([string]$Text, [int]$Y)
+  $l  = New-Object System.Windows.Forms.Label
+  $l.Text  = $Text
+  $l.ForeColor  = $ColSubtext
+  $l.Font  = $FontSmall
+  $l.Location  = New-Object System.Drawing.Point(30, ($Y + 20))
+  $l.Size  = New-Object System.Drawing.Size(680, 14)
+  return $l
+}
+
+$y = 10
+
+# Source folder
+$LblSrc  = New-Object System.Windows.Forms.Label
+$LblSrc.Text  = "Source folder (containing ISOs):"
+$LblSrc.Font  = $FontBold
+$LblSrc.ForeColor = $ColFg
+$LblSrc.Location  = New-Object System.Drawing.Point(8, $y)
+$LblSrc.AutoSize  = $true
+$TabOpts.Controls.Add($LblSrc)
+
+$y += 22
+$TxtSource  = New-Object System.Windows.Forms.TextBox
+$TxtSource.Text  = "$ScriptRoot\ISO-Source"
+$TxtSource.Location= New-Object System.Drawing.Point(8, $y)
+$TxtSource.Size  = New-Object System.Drawing.Size(590, 22)
+$TxtSource.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$TxtSource.ForeColor = $ColFg
+$TxtSource.BorderStyle = "FixedSingle"
+$TabOpts.Controls.Add($TxtSource)
+
+$BtnBrowseSrc  = New-Object System.Windows.Forms.Button
+$BtnBrowseSrc.Text = "Browse..."
+$BtnBrowseSrc.Location = New-Object System.Drawing.Point(604, $y)
+$BtnBrowseSrc.Size = New-Object System.Drawing.Size(100, 22)
+$BtnBrowseSrc.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowseSrc.ForeColor = $ColFg
+$BtnBrowseSrc.FlatStyle = "Flat"
+$TabOpts.Controls.Add($BtnBrowseSrc)
+$BtnBrowseSrc.Add_Click({
+  $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dlg.Description  = "Select folder containing the Windows and Language Pack ISOs"
+  $dlg.SelectedPath = if ($TxtSource.Text -and (Test-Path $TxtSource.Text)) { $TxtSource.Text } else { $ScriptRoot }
+  if ($dlg.ShowDialog() -eq "OK") {
+    $TxtSource.Text = $dlg.SelectedPath
+    Start-ISOProbe
+  }
+})
+
+$BtnRefreshSrc = New-Object System.Windows.Forms.Button
+$BtnRefreshSrc.Text = "Refresh"
+$BtnRefreshSrc.Location = New-Object System.Drawing.Point(604, ($y + 24))
+$BtnRefreshSrc.Size = New-Object System.Drawing.Size(100, 22)
+$BtnRefreshSrc.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnRefreshSrc.ForeColor = $ColFg
+$BtnRefreshSrc.FlatStyle = "Flat"
+$TabOpts.Controls.Add($BtnRefreshSrc)
+$BtnRefreshSrc.Add_Click({ Start-ISOProbe })
+
+# Probe function - extracts build string from ISO, called at startup and on Refresh
+function Start-ISOProbe {
+  # Cancel any existing probe job
+  if ($Script:ProbeJob) {
+    try { Stop-Job $Script:ProbeJob -ErrorAction SilentlyContinue } catch {}
+    try { Remove-Job $Script:ProbeJob -ErrorAction SilentlyContinue } catch {}
+    $Script:ProbeJob = $null
+  }
+  if ($Script:ProbeTimer) {
+    $Script:ProbeTimer.Stop(); $Script:ProbeTimer.Dispose()
+    $Script:ProbeTimer = $null
+  }
+
+  # Show "probing..." in preview while job runs, show spinner
+  $Script:BuildString = '26200.xxxx'
+  $Script:EditionTag  = '25H2'
+  $Script:EditionIndexMap = @{}
+  $CmbEdition.Items.Clear()
+  $CmbEdition.Enabled = $false
+  $LblSpinner.Visible = $true
+  $Script:SpinnerTimer.Start()
+  $BtnRun.Visible = $false
+  $LblRunText.Visible = $false
+  Update-UI
+
+  $probeFolder = $TxtSource.Text
+  $Script:ProbeJob = Start-Job -ScriptBlock {
+    param($Folder)
+    if (-not (Test-Path $Folder)) { return 'WIMWIZ:26200.xxxx|25H2' }
+    $isoPath = $null
+    try {
+      $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
+                   Where-Object { $_.Extension -match '^\.iso$' -and $_.Name -notmatch 'LangPack|Language|InboxApps' })
+      if ($winISOs.Count -eq 0) { return 'WIMWIZ:26200.xxxx|25H2' }
+      # When both x64 and arm64 ISOs are present, probe x64 (same build number)
+      $probeISO = $winISOs | Where-Object { $_.Name -notmatch 'arm64' } | Select-Object -First 1
+      if (-not $probeISO) { $probeISO = $winISOs[0] }
+      $isoName = $probeISO.Name
+
+      # Detect edition from ISO filename
+      $edition = if ($isoName -match 'ltsc') { 'LTSC2024' } else { '25H2' }
+
+      # Try filename first for build number - but still need to mount for index list
+      $buildFromFilename = $null
+      if ($isoName -match '(\d{5})[\._](\d{4,5})') {
+        $buildFromFilename = "$($Matches[1]).$($Matches[2])"
+      }
+
+      # Mount ISO and read WIM index list
+      # All intermediate results assigned to typed variables to prevent implicit pipeline output
+      $isoPath = $probeISO.FullName
+      [Microsoft.Management.Infrastructure.CimInstance]$diskImg = Get-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
+      if (-not $diskImg.Attached) {
+        Mount-DiskImage -ImagePath $isoPath -ErrorAction Stop | Out-Null
+        [Microsoft.Management.Infrastructure.CimInstance]$diskImg = Get-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
+      }
+      [string]$driveLetter = ($diskImg | Get-Volume -ErrorAction SilentlyContinue).DriveLetter
+      if (-not $driveLetter) { return "WIMWIZ:26200.xxxx|$edition" }
+      [string]$drive = $driveLetter + ':\'
+      [string]$wim = Join-Path $drive 'sources\install.wim'
+      if (-not (Test-Path $wim)) { [string]$wim = Join-Path $drive 'sources\install.esd' }
+      if (-not (Test-Path $wim)) { return "WIMWIZ:26200.xxxx|$edition" }
+      [object[]]$allImages = Get-WindowsImage -ImagePath $wim -ErrorAction SilentlyContinue
+      [object]$info = $allImages | Where-Object { $_.ImageName -match 'Enterprise' -and $_.ImageName -notmatch 'Evaluation' } | Select-Object -First 1
+      if (-not $info) { [object]$info = $allImages | Select-Object -First 1 }
+      if (-not $info) { Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null; return "WIMWIZ:26200.xxxx|$edition|" }
+      [object]$full = Get-WindowsImage -ImagePath $wim -Index $info.ImageIndex -ErrorAction SilentlyContinue
+      [string]$build = if ($buildFromFilename) { $buildFromFilename } else { [string]($full.Version -replace '^\d+\.\d+\.', '') }
+      [string]$indexList = ($allImages | ForEach-Object { "$($_.ImageIndex):$($_.ImageName)" }) -join '~'
+      Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null
+      return "WIMWIZ:$build|$edition|$indexList"
+    } catch {
+      if ($isoPath) { try { Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null } catch {} }
+      return 'WIMWIZ:26200.xxxx|25H2'
+    }
+  } -ArgumentList $probeFolder
+
+  $Script:ProbeTimer = New-Object System.Windows.Forms.Timer
+  $Script:ProbeTimer.Interval = 1000
+  $Script:ProbeTimer.Add_Tick({
+    if (-not $Script:ProbeTimer) { return }
+    if ($Script:ProbeJob.State -in 'Completed','Failed','Stopped') {
+      $Script:ProbeTimer.Stop(); $Script:ProbeTimer.Dispose()
+      $Script:ProbeTimer = $null
+      $rawResult = @(Receive-Job $Script:ProbeJob -ErrorAction SilentlyContinue)
+      Remove-Job $Script:ProbeJob -Force -ErrorAction SilentlyContinue
+      $Script:ProbeJob = $null
+      $Script:SpinnerTimer.Stop()
+      $LblSpinner.Visible = $false
+      $result = $rawResult | Where-Object { "$_" -match '^WIMWIZ:' } | Select-Object -Last 1
+      $result = if ($result) { $result -replace '^WIMWIZ:', '' } else { '' }
+      if ($result -and $result -match '^([\d\.x]+)\|([^\|]+)\|?(.*)$') {
+        $buildPart   = $Matches[1]
+        $editionPart = $Matches[2]
+        $indexPart   = $Matches[3]
+        if ($buildPart -match '^\d+\.\d+$') { $Script:BuildString = $buildPart }
+        $Script:EditionTag = $editionPart
+        $CmbEdition.Items.Clear()
+        $Script:EditionIndexMap = @{}
+        if ($indexPart) {
+          foreach ($entry in ($indexPart -split '~')) {
+            if ($entry -match '^(\d+):(.+)$') {
+              $wimIdx  = [int]$Matches[1]
+              $wimName = [string]$Matches[2]
+              $CmbEdition.Items.Add($wimName) | Out-Null
+              $Script:EditionIndexMap[$CmbEdition.Items.Count - 1] = $wimIdx
+            }
+          }
+          $defaultIndex = -1
+          for ($i = 0; $i -lt $CmbEdition.Items.Count; $i++) {
+            $item = $CmbEdition.Items[$i]
+            if ($item -match 'Enterprise' -and $item -notmatch 'Evaluation') { $defaultIndex = $i; break }
+          }
+          if ($defaultIndex -lt 0 -and $CmbEdition.Items.Count -gt 0) { $defaultIndex = 0 }
+          $CmbEdition.SelectedIndex = $defaultIndex
+          $CmbEdition.Enabled = $true
+          $CmbEdition.Invalidate()
+          $CmbEdition.Refresh()
+          $PanelEdition.Invalidate()
+          $PanelEdition.Refresh()
+        } else {
+          $CmbEdition.Enabled = $false
+        }
+        Update-UI
+      }
+      Update-RunButton
+    }
+  })
+  $Script:ProbeTimer.Start()
+}
+
+# ISO status indicators - shown below source folder
+$y += 28
+$Script:ISOStatusPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$Script:ISOStatusPanel.Location  = New-Object System.Drawing.Point(8, $y)
+$Script:ISOStatusPanel.Size      = New-Object System.Drawing.Size(700, 18)
+$Script:ISOStatusPanel.BackColor = [System.Drawing.Color]::Transparent
+$Script:ISOStatusPanel.FlowDirection = "LeftToRight"
+$Script:ISOStatusPanel.WrapContents  = $false
+$TabOpts.Controls.Add($Script:ISOStatusPanel)
+
+function New-ISOIndicator {
+  param([string]$Name)
+  $lbl = New-Object System.Windows.Forms.Label
+  $lbl.Text      = "? $Name"
+  $lbl.Font      = $FontSmall
+  $lbl.ForeColor = $ColSubtext
+  $lbl.AutoSize  = $true
+  $lbl.Margin    = New-Object System.Windows.Forms.Padding(0, 0, 18, 0)
+  return $lbl
+}
+
+$Script:IndWin      = New-ISOIndicator "Windows ISO"
+$Script:IndLP       = New-ISOIndicator "Language Pack ISO"
+$Script:ISOStatusPanel.Controls.Add($Script:IndWin)
+$Script:ISOStatusPanel.Controls.Add($Script:IndLP)
+
+function Update-ISOStatus {
+  # Guard - controls may not exist yet during initial form setup
+  if (-not $Script:ISOStatusPanel -or -not $Script:IndWin) { return }
+
+  $folder = $TxtSource.Text.Trim()
+  $patchMode = if ($ChkPatchMode) { $ChkPatchMode.Checked } else { $false }
+
+  # In patch mode hide all indicators - ISOs not needed
+  $Script:ISOStatusPanel.Visible = -not $patchMode
+  if ($patchMode) { if ($PanelArch) { $PanelArch.Visible = $false }; if ($CmbEdition) { $CmbEdition.Items.Clear(); $CmbEdition.Enabled = $false }; return }
+
+  $ColGreen = [System.Drawing.Color]::FromArgb(0, 200, 80)
+  $ColRed   = [System.Drawing.Color]::FromArgb(220, 60, 60)
+
+  $winFound      = $false
+  $lpFound       = $false
+  $needsLP       = -not $ChkSkipLPs.Checked
+  $wantArm64LP   = $RadArm64 -and $RadArm64.Checked
+
+  # UNC paths not supported - Mount-DiskImage requires a local path
+  if ($folder -match '^\\\\') {
+    $Script:IndWin.Text      = [char]0x2718 + "  UNC paths are not supported - ISO source must be a local folder"
+    $Script:IndWin.ForeColor = $ColRed
+    $Script:IndWin.AutoSize  = $true
+    $Script:IndLP.Text       = ""
+    Update-ArchPanel
+    return
+  }
+
+  $Script:IndWin.AutoSize = $false   # restore if it was set wide for UNC error
+
+  if ($folder -and (Test-Path $folder)) {
+    $isos = @(Get-ChildItem $folder -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.iso$" })
+    foreach ($iso in $isos) {
+      $n = $iso.Name.ToLower()
+      if ($n -match 'langpack|language.?pack|lang_pack|_lp_') {
+        $lpIsArm64 = $n -match 'arm64'
+        if ($lpIsArm64 -eq $wantArm64LP) { $lpFound = $true }
+      } elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc') { $winFound = $true }
+    }
+  } elseif ($folder -match '^[A-Za-z]:\\' -and $folder -notmatch '^[Cc]:\\') {
+    # Folder not found - check if it's a mapped drive missing in elevated session
+    $driveLetter = $folder.Substring(0, 2)
+    if (-not (Test-Path $driveLetter)) {
+      $Script:IndWin.Text      = [char]0x2718 + " Drive $driveLetter not available (run as admin?)"
+      $Script:IndWin.ForeColor = $ColRed
+      $Script:IndLP.Text       = "Drive not accessible in elevated session - check mapping"
+      $Script:IndLP.ForeColor  = $ColRed
+      Update-ArchPanel
+      return
+    }
+  }
+
+  # Update architecture detection panel
+  Update-ArchPanel
+
+  # Windows ISO indicator
+  if ($winFound -or $Script:HasX64 -or $Script:HasArm64) {
+    $Script:IndWin.Text      = [char]0x2714 + " Windows ISO"
+    $Script:IndWin.ForeColor = $ColGreen
+  } else {
+    $Script:IndWin.Text      = [char]0x2718 + " Windows ISO"
+    $Script:IndWin.ForeColor = $ColRed
+  }
+
+  # Language Pack ISO
+  if ($lpFound) {
+    $Script:IndLP.Text      = [char]0x2714 + " Language Pack ISO"
+    $Script:IndLP.ForeColor = $ColGreen
+  } elseif ($needsLP) {
+    $Script:IndLP.Text      = [char]0x2718 + " Language Pack ISO"
+    $Script:IndLP.ForeColor = $ColRed
+  } else {
+    $Script:IndLP.Text      = "- Language Pack ISO"
+    $Script:IndLP.ForeColor = $ColSubtext
+  }
+}
+
+# Show/hide Run button based on ISO status and probe completion
+function Update-RunButton {
+  if (-not $Script:ISOStatusPanel -or -not $Script:IndWin -or -not $BtnRun) { return }
+  if ($ChkPatchMode -and $ChkPatchMode.Checked) {
+    $BtnRun.Visible    = $true
+    $LblRunText.Visible = $true
+    return
+  }
+  # Full build: require Windows ISO indicator to be green and build string resolved
+  $isoReady   = $Script:IndWin.Text -match [char]0x2714
+  $buildReady = $Script:BuildString -ne '26200.xxxx'
+  $ready = $isoReady -and $buildReady
+  $BtnRun.Visible    = $ready
+  $LblRunText.Visible = $ready
+}
+
+# Architecture toggle - shown only when both x64 and arm64 ISOs are found
+$y += 28
+$PanelArch = New-Object System.Windows.Forms.Panel
+$PanelArch.Location  = New-Object System.Drawing.Point(8, $y)
+$PanelArch.Size      = New-Object System.Drawing.Size(700, 24)
+$PanelArch.BackColor = [System.Drawing.Color]::Transparent
+$PanelArch.Visible   = $false
+$TabOpts.Controls.Add($PanelArch)
+
+$LblArch = New-Object System.Windows.Forms.Label
+$LblArch.Text      = "Build architecture:"
+$LblArch.Font      = $FontBold
+$LblArch.ForeColor = $ColFg
+$LblArch.Location  = New-Object System.Drawing.Point(0, 4)
+$LblArch.AutoSize  = $true
+$PanelArch.Controls.Add($LblArch)
+
+# Radio buttons - mutually exclusive, x64 default
+$RadX64 = New-Object System.Windows.Forms.RadioButton
+$RadX64.Text      = "x64"
+$RadX64.Checked   = $true
+$RadX64.ForeColor = $ColFg
+$RadX64.BackColor = [System.Drawing.Color]::Transparent
+$RadX64.Font      = $FontMain
+$RadX64.AutoSize  = $true
+$RadX64.Location  = New-Object System.Drawing.Point(135, 2)
+$RadX64.Add_CheckedChanged({ Update-UI })
+$PanelArch.Controls.Add($RadX64)
+
+$RadArm64 = New-Object System.Windows.Forms.RadioButton
+$RadArm64.Text      = "ARM64"
+$RadArm64.Checked   = $false
+$RadArm64.ForeColor = $ColFg
+$RadArm64.BackColor = [System.Drawing.Color]::Transparent
+$RadArm64.Font      = $FontMain
+$RadArm64.AutoSize  = $true
+$RadArm64.Location  = New-Object System.Drawing.Point(195, 2)
+$RadArm64.Add_CheckedChanged({ Update-UI })
+$PanelArch.Controls.Add($RadArm64)
+
+function Update-ArchPanel {
+  $folder = $TxtSource.Text.Trim()
+  $Script:HasX64   = $false
+  $Script:HasArm64 = $false
+  if ($folder -and (Test-Path $folder)) {
+    $isos = @(Get-ChildItem $folder -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.iso$" })
+    foreach ($iso in $isos) {
+      $n = $iso.Name.ToLower()
+      if ($n -match 'langpack|language.?pack|lang_pack|_lp_') { continue }
+      if ($n -match 'arm64') { $Script:HasArm64 = $true }
+      elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc') { $Script:HasX64 = $true }
+    }
+  }
+  $both = $Script:HasX64 -and $Script:HasArm64
+  $PanelArch.Visible = $both
+  if (-not $both) {
+    $RadX64.Checked = $true   # reset to x64 when panel hides
+    if ($ChkSkipLPs) { $ChkSkipLPs.Enabled = $true }
+  }
+  # Re-enable LP checkbox when arch changes (no longer force-locked for ARM64)
+  if ($ChkSkipLPs) { $ChkSkipLPs.Enabled = $true }
+  # Update FoD availability for selected architecture
+  if ($PanelArch -and $PanelArch.Visible -ne $null) { Update-FoDPanel }
+}
+
+# Edition / WIM index selector
+$y += 36
+$PanelEdition = New-Object System.Windows.Forms.Panel
+$PanelEdition.Location  = New-Object System.Drawing.Point(8, $y)
+$PanelEdition.Size      = New-Object System.Drawing.Size(700, 24)
+$PanelEdition.BackColor = [System.Drawing.Color]::Transparent
+$PanelEdition.Visible   = $true
+$TabOpts.Controls.Add($PanelEdition)
+
+$LblEdition = New-Object System.Windows.Forms.Label
+$LblEdition.Text      = "Image edition:"
+$LblEdition.Font      = $FontBold
+$LblEdition.ForeColor = $ColFg
+$LblEdition.Location  = New-Object System.Drawing.Point(0, 4)
+$LblEdition.AutoSize  = $true
+$PanelEdition.Controls.Add($LblEdition)
+
+$CmbEdition = New-Object System.Windows.Forms.ComboBox
+$CmbEdition.Location      = New-Object System.Drawing.Point(135, 1)
+$CmbEdition.Size          = New-Object System.Drawing.Size(380, 22)
+$CmbEdition.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+$CmbEdition.BackColor     = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$CmbEdition.ForeColor     = $ColFg
+$CmbEdition.FlatStyle     = "Flat"
+$CmbEdition.Enabled       = $false
+$CmbEdition.Add_SelectedIndexChanged({ Update-UI; Update-SCCMPreview })
+$PanelEdition.Controls.Add($CmbEdition)
+
+# Output filename
+$y += 36
+$LblOut  = New-Object System.Windows.Forms.Label
+$LblOut.Text  = "Output WIM filename:"
+$LblOut.Font  = $FontBold
+$LblOut.ForeColor = $ColFg
+$LblOut.Location  = New-Object System.Drawing.Point(8, $y)
+$LblOut.AutoSize  = $true
+$TabOpts.Controls.Add($LblOut)
+
+$y += 22
+$TxtOutput  = New-Object System.Windows.Forms.TextBox
+$TxtOutput.Location= New-Object System.Drawing.Point(8, $y)
+$TxtOutput.Size  = New-Object System.Drawing.Size(590, 22)
+$TxtOutput.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$TxtOutput.ForeColor = $ColWarn
+$TxtOutput.BorderStyle = "FixedSingle"
+$TabOpts.Controls.Add($TxtOutput)
+
+$BtnBrowseOut  = New-Object System.Windows.Forms.Button
+$BtnBrowseOut.Text = "Browse..."
+$BtnBrowseOut.Location = New-Object System.Drawing.Point(604, $y)
+$BtnBrowseOut.Size = New-Object System.Drawing.Size(100, 22)
+$BtnBrowseOut.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowseOut.ForeColor = $ColFg
+$BtnBrowseOut.FlatStyle = "Flat"
+$TabOpts.Controls.Add($BtnBrowseOut)
+$BtnBrowseOut.Add_Click({
+  $dlg = New-Object System.Windows.Forms.SaveFileDialog
+  $dlg.Title  = "Choose output WIM path"
+  $dlg.Filter = "WIM files (*.wim)|*.wim"
+  $dlg.InitialDirectory = "$ScriptRoot\Output"
+  $dlg.FileName = $TxtOutput.Text
+  if ($dlg.ShowDialog() -eq "OK") { $TxtOutput.Text = $dlg.FileName }
+})
+
+$y += 22
+$LblOutHint  = New-Object System.Windows.Forms.Label
+$LblOutHint.Text  = "Leave blank to auto-generate from version, languages and date (recommended)."
+$LblOutHint.Font  = $FontSmall
+$LblOutHint.ForeColor = $ColSubtext
+$LblOutHint.Location  = New-Object System.Drawing.Point(8, ($y + 2))
+$LblOutHint.AutoSize  = $true
+$TabOpts.Controls.Add($LblOutHint)
+
+# Separator
+$y += 28
+$Sep2 = New-Object System.Windows.Forms.Panel
+$Sep2.Location  = New-Object System.Drawing.Point(8, $y)
+$Sep2.Size      = New-Object System.Drawing.Size(700, 1)
+$Sep2.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$TabOpts.Controls.Add($Sep2)
+
+# Option switches
+$y += 9
+$LblSwitches  = New-Object System.Windows.Forms.Label
+$LblSwitches.Text  = "Servicing options:"
+$LblSwitches.Font  = $FontBold
+$LblSwitches.ForeColor = $ColFg
+$LblSwitches.Location  = New-Object System.Drawing.Point(8, $y)
+$LblSwitches.AutoSize  = $true
+$TabOpts.Controls.Add($LblSwitches)
+
+$y += 24
+$ChkSkipUpdates = New-DarkCheckbox -Text "Skip updates  (-SkipUpdates)" -Checked $false
+$ChkSkipUpdates.Location = New-Object System.Drawing.Point(8, $y)
+$ChkSkipUpdates.Width  = 400
+$TabOpts.Controls.Add($ChkSkipUpdates)
+$TabOpts.Controls.Add((New-OptionLabel "Do not download or apply Patch Tuesday updates." $y))
+
+$y += 45
+$ChkSkipLPs = New-DarkCheckbox -Text "Skip language packs  (-SkipLanguagePacks)" -Checked $false
+$ChkSkipLPs.Location = New-Object System.Drawing.Point(8, $y)
+$ChkSkipLPs.Width  = 400
+$TabOpts.Controls.Add($ChkSkipLPs)
+$TabOpts.Controls.Add((New-OptionLabel "Skip language pack and FOD injection (English only image)." $y))
+
+$y += 45
+$ChkSkipAppx = New-DarkCheckbox -Text "Skip Appx removal  (-SkipAppxRemoval)" -Checked $false
+$ChkSkipAppx.Location = New-Object System.Drawing.Point(8, $y)
+$ChkSkipAppx.Width  = 400
+$TabOpts.Controls.Add($ChkSkipAppx)
+$TabOpts.Controls.Add((New-OptionLabel "Do not remove any provisioned Appx packages." $y))
+
+$y += 45
+
+
 
 # ==============================================================================
 # TAB 1 - LANGUAGES
@@ -547,509 +1521,6 @@ $BtnCheckDefault.Add_Click({
 })
 
 # ==============================================================================
-# TAB 3 - OPTIONS
-# ==============================================================================
-$TabOpts = New-Tab "  Options"
-
-function New-OptionLabel {
-  param([string]$Text, [int]$Y)
-  $l  = New-Object System.Windows.Forms.Label
-  $l.Text  = $Text
-  $l.ForeColor  = $ColSubtext
-  $l.Font  = $FontSmall
-  $l.Location  = New-Object System.Drawing.Point(30, ($Y + 20))
-  $l.Size  = New-Object System.Drawing.Size(680, 14)
-  return $l
-}
-
-$y = 10
-
-# Source folder
-$LblSrc  = New-Object System.Windows.Forms.Label
-$LblSrc.Text  = "Source folder (containing ISOs):"
-$LblSrc.Font  = $FontBold
-$LblSrc.ForeColor = $ColFg
-$LblSrc.Location  = New-Object System.Drawing.Point(8, $y)
-$LblSrc.AutoSize  = $true
-$TabOpts.Controls.Add($LblSrc)
-
-$y += 22
-$TxtSource  = New-Object System.Windows.Forms.TextBox
-$TxtSource.Text  = "$ScriptRoot\ISO-Source"
-$TxtSource.Location= New-Object System.Drawing.Point(8, $y)
-$TxtSource.Size  = New-Object System.Drawing.Size(590, 22)
-$TxtSource.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-$TxtSource.ForeColor = $ColFg
-$TxtSource.BorderStyle = "FixedSingle"
-$TabOpts.Controls.Add($TxtSource)
-
-$BtnBrowseSrc  = New-Object System.Windows.Forms.Button
-$BtnBrowseSrc.Text = "Browse..."
-$BtnBrowseSrc.Location = New-Object System.Drawing.Point(604, $y)
-$BtnBrowseSrc.Size = New-Object System.Drawing.Size(100, 22)
-$BtnBrowseSrc.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-$BtnBrowseSrc.ForeColor = $ColFg
-$BtnBrowseSrc.FlatStyle = "Flat"
-$TabOpts.Controls.Add($BtnBrowseSrc)
-$BtnBrowseSrc.Add_Click({
-  $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-  $dlg.Description = "Select folder containing the Windows and Language Pack ISOs"
-  $dlg.SelectedPath = $TxtSource.Text
-  if ($dlg.ShowDialog() -eq "OK") {
-    $TxtSource.Text = $dlg.SelectedPath
-    Start-ISOProbe
-  }
-})
-
-$BtnRefreshSrc = New-Object System.Windows.Forms.Button
-$BtnRefreshSrc.Text = "Refresh"
-$BtnRefreshSrc.Location = New-Object System.Drawing.Point(604, ($y + 24))
-$BtnRefreshSrc.Size = New-Object System.Drawing.Size(100, 22)
-$BtnRefreshSrc.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-$BtnRefreshSrc.ForeColor = $ColFg
-$BtnRefreshSrc.FlatStyle = "Flat"
-$TabOpts.Controls.Add($BtnRefreshSrc)
-$BtnRefreshSrc.Add_Click({ Start-ISOProbe })
-
-# Probe function - extracts build string from ISO, called at startup and on Refresh
-function Start-ISOProbe {
-  # Cancel any existing probe job
-  if ($Script:ProbeJob) {
-    try { Stop-Job $Script:ProbeJob -ErrorAction SilentlyContinue } catch {}
-    try { Remove-Job $Script:ProbeJob -ErrorAction SilentlyContinue } catch {}
-    $Script:ProbeJob = $null
-  }
-  if ($Script:ProbeTimer) {
-    $Script:ProbeTimer.Stop(); $Script:ProbeTimer.Dispose()
-    $Script:ProbeTimer = $null
-  }
-
-  # Show "probing..." in preview while job runs, show spinner
-  $Script:BuildString = '26200.xxxx'
-  $Script:EditionTag  = '25H2'
-  $LblSpinner.Visible = $true
-  $Script:SpinnerTimer.Start()
-  $BtnRun.Visible = $false
-  $LblRunText.Visible = $false
-  Update-UI
-
-  $probeFolder = $TxtSource.Text
-  $Script:ProbeJob = Start-Job -ScriptBlock {
-    param($Folder)
-    if (-not (Test-Path $Folder)) { return '26200.xxxx|25H2' }
-    $isoPath = $null
-    try {
-      $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
-                   Where-Object { $_.Extension -match '^\.iso$' -and $_.Name -notmatch 'LangPack|Language|InboxApps' })
-      if ($winISOs.Count -eq 0) { return '26200.xxxx|25H2' }
-      # When both x64 and arm64 ISOs are present, probe x64 (same build number)
-      $probeISO = $winISOs | Where-Object { $_.Name -notmatch 'arm64' } | Select-Object -First 1
-      if (-not $probeISO) { $probeISO = $winISOs[0] }
-      $isoName = $probeISO.Name
-
-      # Detect edition from ISO filename
-      $edition = if ($isoName -match 'ltsc') { 'LTSC2024' } else { '25H2' }
-
-      # Try filename first - instant, no mount needed
-      if ($isoName -match '(\d{5})[\._](\d{4,5})') {
-        return "$($Matches[1]).$($Matches[2])|$edition"
-      }
-
-      # Fallback: mount and read WIM
-      $isoPath = $probeISO.FullName
-      $diskImg = Get-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
-      if (-not $diskImg.Attached) {
-        $diskImg = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
-      }
-      $driveLetter = ($diskImg | Get-Volume -ErrorAction SilentlyContinue).DriveLetter
-      if (-not $driveLetter) { return "26200.xxxx|$edition" }
-      $drive = $driveLetter + ':\'
-      $wim = Join-Path $drive 'sources\install.wim'
-      if (-not (Test-Path $wim)) { $wim = Join-Path $drive 'sources\install.esd' }
-      if (-not (Test-Path $wim)) { return "26200.xxxx|$edition" }
-      $info = Get-WindowsImage -ImagePath $wim |
-              Where-Object { $_.ImageName -match 'Enterprise' } | Select-Object -First 1
-      if (-not $info) { $info = Get-WindowsImage -ImagePath $wim | Select-Object -First 1 }
-      if (-not $info) { return "26200.xxxx|$edition" }
-      $full  = Get-WindowsImage -ImagePath $wim -Index $info.ImageIndex
-      $build = [string]($full.Version -replace '^\d+\.\d+\.', '')
-      Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null
-      return "$build|$edition"
-    } catch {
-      if ($isoPath) { try { Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null } catch {} }
-      return '26200.xxxx|25H2'
-    }
-  } -ArgumentList $probeFolder
-
-  $Script:ProbeTimer = New-Object System.Windows.Forms.Timer
-  $Script:ProbeTimer.Interval = 1000
-  $Script:ProbeTimer.Add_Tick({
-    if (-not $Script:ProbeTimer) { return }
-    if ($Script:ProbeJob.State -in 'Completed','Failed','Stopped') {
-      $Script:ProbeTimer.Stop(); $Script:ProbeTimer.Dispose()
-      $Script:ProbeTimer = $null
-      $result = Receive-Job $Script:ProbeJob -ErrorAction SilentlyContinue
-      Remove-Job $Script:ProbeJob -ErrorAction SilentlyContinue
-      $Script:ProbeJob = $null
-      $Script:SpinnerTimer.Stop()
-      $LblSpinner.Visible = $false
-      if ($result -and $result -match '^([\d\.x]+)\|(.+)$') {
-        $buildPart   = $Matches[1]
-        $editionPart = $Matches[2]
-        if ($buildPart -match '^\d+\.\d+$') { $Script:BuildString = $buildPart }
-        $Script:EditionTag = $editionPart
-        Update-UI
-      }
-      Update-RunButton
-    }
-  })
-  $Script:ProbeTimer.Start()
-}
-
-# ISO status indicators - shown below source folder
-$y += 28
-$Script:ISOStatusPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$Script:ISOStatusPanel.Location  = New-Object System.Drawing.Point(8, $y)
-$Script:ISOStatusPanel.Size      = New-Object System.Drawing.Size(700, 18)
-$Script:ISOStatusPanel.BackColor = [System.Drawing.Color]::Transparent
-$Script:ISOStatusPanel.FlowDirection = "LeftToRight"
-$Script:ISOStatusPanel.WrapContents  = $false
-$TabOpts.Controls.Add($Script:ISOStatusPanel)
-
-function New-ISOIndicator {
-  param([string]$Name)
-  $lbl = New-Object System.Windows.Forms.Label
-  $lbl.Text      = "? $Name"
-  $lbl.Font      = $FontSmall
-  $lbl.ForeColor = $ColSubtext
-  $lbl.AutoSize  = $true
-  $lbl.Margin    = New-Object System.Windows.Forms.Padding(0, 0, 18, 0)
-  return $lbl
-}
-
-$Script:IndWin      = New-ISOIndicator "Windows ISO"
-$Script:IndLP       = New-ISOIndicator "Language Pack ISO"
-$Script:ISOStatusPanel.Controls.Add($Script:IndWin)
-$Script:ISOStatusPanel.Controls.Add($Script:IndLP)
-
-function Update-ISOStatus {
-  # Guard - controls may not exist yet during initial form setup
-  if (-not $Script:ISOStatusPanel -or -not $Script:IndWin) { return }
-
-  $folder = $TxtSource.Text.Trim()
-  $patchMode = if ($ChkPatchMode) { $ChkPatchMode.Checked } else { $false }
-
-  # In patch mode hide all indicators - ISOs not needed
-  $Script:ISOStatusPanel.Visible = -not $patchMode
-  if ($patchMode) { if ($PanelArch) { $PanelArch.Visible = $false }; return }
-
-  $ColGreen = [System.Drawing.Color]::FromArgb(0, 200, 80)
-  $ColRed   = [System.Drawing.Color]::FromArgb(220, 60, 60)
-
-  $winFound      = $false
-  $lpFound       = $false
-  $needsLP       = -not $ChkSkipLPs.Checked
-  $wantArm64LP   = $RadArm64 -and $RadArm64.Checked
-
-  if (Test-Path $folder) {
-    $isos = @(Get-ChildItem $folder -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.iso$" })
-    foreach ($iso in $isos) {
-      $n = $iso.Name.ToLower()
-      if ($n -match 'langpack|language.?pack|lang_pack|_lp_') {
-        # Match LP ISO to current architecture selection
-        $lpIsArm64 = $n -match 'arm64'
-        if ($lpIsArm64 -eq $wantArm64LP) { $lpFound = $true }
-      } elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc') { $winFound = $true }
-    }
-  } elseif ($folder -match '^[A-Za-z]:\\' -and $folder -notmatch '^[Cc]:\\') {
-    # Folder not found - check if it's a mapped drive missing in elevated session
-    $driveLetter = $folder.Substring(0, 2)
-    if (-not (Test-Path $driveLetter)) {
-      $Script:IndWin.Text = [char]0x2718 + " Drive $driveLetter not available (run as admin?)"
-      $Script:IndWin.ForeColor = $ColRed
-      $Script:IndLP.Text  = "Use UNC path: \\server\share\folder"
-      $Script:IndLP.ForeColor = $ColRed
-      Update-ArchPanel
-      return
-    }
-  }
-
-  # Update architecture detection panel
-  Update-ArchPanel
-
-  # Windows ISO indicator - green if any Windows ISO found (x64 or arm64)
-  if ($winFound -or $Script:HasX64 -or $Script:HasArm64) {
-    $Script:IndWin.Text = [char]0x2714 + " Windows ISO"
-    $Script:IndWin.ForeColor = $ColGreen
-  } else {
-    $Script:IndWin.Text = [char]0x2718 + " Windows ISO"
-    $Script:IndWin.ForeColor = $ColRed
-  }
-
-  # Language Pack ISO
-  if ($lpFound) {
-    $Script:IndLP.Text = [char]0x2714 + " Language Pack ISO"
-    $Script:IndLP.ForeColor = $ColGreen
-  } elseif ($needsLP) {
-    $Script:IndLP.Text = [char]0x2718 + " Language Pack ISO"
-    $Script:IndLP.ForeColor = $ColRed
-  } else {
-    $Script:IndLP.Text = "- Language Pack ISO"
-    $Script:IndLP.ForeColor = $ColSubtext
-  }
-}
-
-# Show/hide Run button based on ISO status and probe completion
-function Update-RunButton {
-  if (-not $Script:ISOStatusPanel -or -not $Script:IndWin -or -not $BtnRun) { return }
-  if ($ChkPatchMode -and $ChkPatchMode.Checked) {
-    $BtnRun.Visible    = $true
-    $LblRunText.Visible = $true
-    return
-  }
-  # Full build: require Windows ISO indicator to be green and build string resolved
-  $isoReady   = $Script:IndWin.Text -match [char]0x2714
-  $buildReady = $Script:BuildString -ne '26200.xxxx'
-  $ready = $isoReady -and $buildReady
-  $BtnRun.Visible    = $ready
-  $LblRunText.Visible = $ready
-}
-
-# Architecture toggle - shown only when both x64 and arm64 ISOs are found
-$y += 28
-$PanelArch = New-Object System.Windows.Forms.Panel
-$PanelArch.Location  = New-Object System.Drawing.Point(8, $y)
-$PanelArch.Size      = New-Object System.Drawing.Size(700, 24)
-$PanelArch.BackColor = [System.Drawing.Color]::Transparent
-$PanelArch.Visible   = $false
-$TabOpts.Controls.Add($PanelArch)
-
-$LblArch = New-Object System.Windows.Forms.Label
-$LblArch.Text      = "Build architecture:"
-$LblArch.Font      = $FontBold
-$LblArch.ForeColor = $ColFg
-$LblArch.Location  = New-Object System.Drawing.Point(0, 4)
-$LblArch.AutoSize  = $true
-$PanelArch.Controls.Add($LblArch)
-
-# Radio buttons - mutually exclusive, x64 default
-$RadX64 = New-Object System.Windows.Forms.RadioButton
-$RadX64.Text      = "x64"
-$RadX64.Checked   = $true
-$RadX64.ForeColor = $ColFg
-$RadX64.BackColor = [System.Drawing.Color]::Transparent
-$RadX64.Font      = $FontMain
-$RadX64.AutoSize  = $true
-$RadX64.Location  = New-Object System.Drawing.Point(135, 2)
-$RadX64.Add_CheckedChanged({ Update-UI })
-$PanelArch.Controls.Add($RadX64)
-
-$RadArm64 = New-Object System.Windows.Forms.RadioButton
-$RadArm64.Text      = "ARM64"
-$RadArm64.Checked   = $false
-$RadArm64.ForeColor = $ColFg
-$RadArm64.BackColor = [System.Drawing.Color]::Transparent
-$RadArm64.Font      = $FontMain
-$RadArm64.AutoSize  = $true
-$RadArm64.Location  = New-Object System.Drawing.Point(195, 2)
-$RadArm64.Add_CheckedChanged({ Update-UI })
-$PanelArch.Controls.Add($RadArm64)
-
-function Update-ArchPanel {
-  $folder = $TxtSource.Text.Trim()
-  $Script:HasX64   = $false
-  $Script:HasArm64 = $false
-  if (Test-Path $folder) {
-    $isos = @(Get-ChildItem $folder -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match "^\.iso$" })
-    foreach ($iso in $isos) {
-      $n = $iso.Name.ToLower()
-      if ($n -match 'langpack|language.?pack|lang_pack|_lp_') { continue }
-      if ($n -match 'arm64') { $Script:HasArm64 = $true }
-      elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc') { $Script:HasX64 = $true }
-    }
-  }
-  $both = $Script:HasX64 -and $Script:HasArm64
-  $PanelArch.Visible = $both
-  if (-not $both) {
-    $RadX64.Checked = $true   # reset to x64 when panel hides
-    if ($ChkSkipLPs) { $ChkSkipLPs.Enabled = $true }
-  }
-  # Re-enable LP checkbox when arch changes (no longer force-locked for ARM64)
-  if ($ChkSkipLPs) { $ChkSkipLPs.Enabled = $true }
-  # Update FoD availability for selected architecture
-  if ($PanelArch -and $PanelArch.Visible -ne $null) { Update-FoDPanel }
-}
-
-# Output filename
-$y += 36
-$LblOut  = New-Object System.Windows.Forms.Label
-$LblOut.Text  = "Output WIM filename:"
-$LblOut.Font  = $FontBold
-$LblOut.ForeColor = $ColFg
-$LblOut.Location  = New-Object System.Drawing.Point(8, $y)
-$LblOut.AutoSize  = $true
-$TabOpts.Controls.Add($LblOut)
-
-$y += 22
-$TxtOutput  = New-Object System.Windows.Forms.TextBox
-$TxtOutput.Location= New-Object System.Drawing.Point(8, $y)
-$TxtOutput.Size  = New-Object System.Drawing.Size(590, 22)
-$TxtOutput.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-$TxtOutput.ForeColor = $ColWarn
-$TxtOutput.BorderStyle = "FixedSingle"
-$TabOpts.Controls.Add($TxtOutput)
-
-$BtnBrowseOut  = New-Object System.Windows.Forms.Button
-$BtnBrowseOut.Text = "Browse..."
-$BtnBrowseOut.Location = New-Object System.Drawing.Point(604, $y)
-$BtnBrowseOut.Size = New-Object System.Drawing.Size(100, 22)
-$BtnBrowseOut.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-$BtnBrowseOut.ForeColor = $ColFg
-$BtnBrowseOut.FlatStyle = "Flat"
-$TabOpts.Controls.Add($BtnBrowseOut)
-$BtnBrowseOut.Add_Click({
-  $dlg = New-Object System.Windows.Forms.SaveFileDialog
-  $dlg.Title  = "Choose output WIM path"
-  $dlg.Filter = "WIM files (*.wim)|*.wim"
-  $dlg.InitialDirectory = "$ScriptRoot\Output"
-  $dlg.FileName = $TxtOutput.Text
-  if ($dlg.ShowDialog() -eq "OK") { $TxtOutput.Text = $dlg.FileName }
-})
-
-$y += 22
-$LblOutHint  = New-Object System.Windows.Forms.Label
-$LblOutHint.Text  = "Leave blank to auto-generate from version, languages and date (recommended)."
-$LblOutHint.Font  = $FontSmall
-$LblOutHint.ForeColor = $ColSubtext
-$LblOutHint.Location  = New-Object System.Drawing.Point(8, ($y + 2))
-$LblOutHint.AutoSize  = $true
-$TabOpts.Controls.Add($LblOutHint)
-
-# Separator
-$y += 28
-$Sep1 = New-Object System.Windows.Forms.Panel
-$Sep1.Location  = New-Object System.Drawing.Point(8, $y)
-$Sep1.Size  = New-Object System.Drawing.Size(700, 1)
-$Sep1.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$TabOpts.Controls.Add($Sep1)
-
-# Patch mode
-$y += 10
-$LblPatchMode  = New-Object System.Windows.Forms.Label
-$LblPatchMode.Text  = "Patch existing image:"
-$LblPatchMode.Font  = $FontBold
-$LblPatchMode.ForeColor = $ColFg
-$LblPatchMode.Location  = New-Object System.Drawing.Point(8, $y)
-$LblPatchMode.AutoSize  = $true
-$TabOpts.Controls.Add($LblPatchMode)
-
-$y += 22
-$ChkPatchMode = New-DarkCheckbox -Text "Patch an existing WIM instead of building from ISO" -Checked $false
-$ChkPatchMode.Location = New-Object System.Drawing.Point(8, $y)
-$ChkPatchMode.Width    = 500
-$TabOpts.Controls.Add($ChkPatchMode)
-$TabOpts.Controls.Add((New-OptionLabel "Applies updates only. Languages and apps read from the WIM. No ISO needed." $y))
-
-$y += 46
-$TxtPatchWim  = New-Object System.Windows.Forms.TextBox
-$TxtPatchWim.Location= New-Object System.Drawing.Point(8, $y)
-$TxtPatchWim.Size    = New-Object System.Drawing.Size(590, 22)
-$TxtPatchWim.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
-$TxtPatchWim.ForeColor = $ColSubtext
-$TxtPatchWim.BorderStyle = "FixedSingle"
-$TxtPatchWim.Text    = "Select existing WIM file..."
-$TxtPatchWim.Enabled = $false
-$TabOpts.Controls.Add($TxtPatchWim)
-
-$BtnBrowsePatch  = New-Object System.Windows.Forms.Button
-$BtnBrowsePatch.Text = "Browse..."
-$BtnBrowsePatch.Location = New-Object System.Drawing.Point(604, $y)
-$BtnBrowsePatch.Size = New-Object System.Drawing.Size(100, 22)
-$BtnBrowsePatch.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-$BtnBrowsePatch.ForeColor = $ColFg
-$BtnBrowsePatch.FlatStyle = "Flat"
-$BtnBrowsePatch.Enabled = $false
-$TabOpts.Controls.Add($BtnBrowsePatch)
-$BtnBrowsePatch.Add_Click({
-    $dlg = New-Object System.Windows.Forms.OpenFileDialog
-    $dlg.Title  = "Select existing WIM file to patch"
-    $dlg.Filter = "WIM files (*.wim)|*.wim"
-    $dlg.InitialDirectory = "$ScriptRoot\Output"
-    if ($dlg.ShowDialog() -eq "OK") {
-        $TxtPatchWim.Text = $dlg.FileName
-        # Read WIM metadata and auto-populate languages
-        Read-WimLanguages -WimPath $dlg.FileName
-        Update-UI
-    }
-})
-
-$ChkPatchMode.Add_CheckedChanged({
-    $on = $ChkPatchMode.Checked
-    $TxtPatchWim.Enabled  = $on
-    $BtnBrowsePatch.Enabled = $on
-    $TxtPatchWim.ForeColor  = if ($on) { $ColFg } else { $ColSubtext }
-    # Grey out language and apps tabs when patch mode active
-    $TabLang.Enabled = -not $on
-    $TabApps.Enabled = -not $on
-    # All servicing options are irrelevant in patch mode - disable them all
-    foreach ($chk in @($ChkSkipUpdates, $ChkSkipLPs, $ChkSkipAppx)) {
-        $chk.Enabled = -not $on
-        if ($on) { $chk.Checked = $false }
-    }
-    if ($on) {
-        $Tabs.SelectedTab = $TabOpts
-        if ($TxtPatchWim.Text -ne "Select existing WIM file..." -and (Test-Path $TxtPatchWim.Text)) {
-            Read-WimLanguages -WimPath $TxtPatchWim.Text
-        }
-    }
-    Update-UI
-    Update-RunButton
-})
-
-# Separator
-$y += 32
-$Sep2 = New-Object System.Windows.Forms.Panel
-$Sep2.Location  = New-Object System.Drawing.Point(8, $y)
-$Sep2.Size      = New-Object System.Drawing.Size(700, 1)
-$Sep2.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$TabOpts.Controls.Add($Sep2)
-
-# Option switches
-$y += 9
-$LblSwitches  = New-Object System.Windows.Forms.Label
-$LblSwitches.Text  = "Servicing options:"
-$LblSwitches.Font  = $FontBold
-$LblSwitches.ForeColor = $ColFg
-$LblSwitches.Location  = New-Object System.Drawing.Point(8, $y)
-$LblSwitches.AutoSize  = $true
-$TabOpts.Controls.Add($LblSwitches)
-
-$y += 24
-$ChkSkipUpdates = New-DarkCheckbox -Text "Skip updates  (-SkipUpdates)" -Checked $false
-$ChkSkipUpdates.Location = New-Object System.Drawing.Point(8, $y)
-$ChkSkipUpdates.Width  = 400
-$TabOpts.Controls.Add($ChkSkipUpdates)
-$TabOpts.Controls.Add((New-OptionLabel "Do not download or apply Patch Tuesday updates." $y))
-
-$y += 45
-$ChkSkipLPs = New-DarkCheckbox -Text "Skip language packs  (-SkipLanguagePacks)" -Checked $false
-$ChkSkipLPs.Location = New-Object System.Drawing.Point(8, $y)
-$ChkSkipLPs.Width  = 400
-$TabOpts.Controls.Add($ChkSkipLPs)
-$TabOpts.Controls.Add((New-OptionLabel "Skip language pack and FOD injection (English only image)." $y))
-
-$y += 45
-$ChkSkipAppx = New-DarkCheckbox -Text "Skip Appx removal  (-SkipAppxRemoval)" -Checked $false
-$ChkSkipAppx.Location = New-Object System.Drawing.Point(8, $y)
-$ChkSkipAppx.Width  = 400
-$TabOpts.Controls.Add($ChkSkipAppx)
-$TabOpts.Controls.Add((New-OptionLabel "Do not remove any provisioned Appx packages." $y))
-
-$y += 45
-
-
-
-# ==============================================================================
 # TAB 4 - FEATURES ON DEMAND
 # ==============================================================================
 $TabFoD = New-Tab "  Features on Demand"
@@ -1136,7 +1607,1191 @@ function Update-FoDPanel {
 }
 
 # ==============================================================================
-# TAB 5 - HELP
+# TAB 5 - SCCM
+# ==============================================================================
+$TabSCCM = New-Tab "  SCCM"
+
+# Dynamic form resizing - expand when entering SCCM tab, restore when leaving
+$Script:FormDefaultHeight = 620
+$Script:FormSCCMHeight    = 980
+$Tabs.Add_SelectedIndexChanged({
+  if ($Tabs.SelectedTab -eq $TabSCCM -or $Tabs.SelectedTab -eq $TabHelp) {
+    $Form.MinimumSize = New-Object System.Drawing.Size(780, $Script:FormSCCMHeight)
+    $Form.Size        = New-Object System.Drawing.Size(780, $Script:FormSCCMHeight)
+    $Tabs.Size        = New-Object System.Drawing.Size(742, ($Script:FormSCCMHeight - 171))
+    if ($HelpText) { $HelpText.Size = New-Object System.Drawing.Size(722, ($Script:FormSCCMHeight - 220)) }
+    $PanelBottom.BringToFront()
+  } else {
+    $Form.MinimumSize = New-Object System.Drawing.Size(0, 0)
+    $Form.Size        = New-Object System.Drawing.Size(780, $Script:FormDefaultHeight)
+    $Form.MinimumSize = New-Object System.Drawing.Size(780, $Script:FormDefaultHeight)
+    $Tabs.Size        = New-Object System.Drawing.Size(742, 449)
+    if ($HelpText) { $HelpText.Size = New-Object System.Drawing.Size(722, 410) }
+    $PanelBottom.BringToFront()
+  }
+})
+
+# -- Helper functions ----------------------------------------------------------
+
+function Resolve-SCCMNameTemplate {
+  $template = $TxtSCCMNameTemplate.Text
+  $langs = @($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } |
+             ForEach-Object { $_.Key } | Sort-Object)
+  $fods  = @($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked -and $_.Value.Enabled } |
+             ForEach-Object { $_.Key } | Sort-Object)
+  $langStr = if ($langs.Count -gt 0) { $langs -join ", " } else { "" }
+  $fodStr  = if ($fods.Count  -gt 0) { $fods  -join ", " } else { "" }
+  $verStr  = if ($Script:EditionTag)  { $Script:EditionTag } else { "" }
+  $edStr   = Get-EditionTag
+  $result  = $template
+  $result  = $result -replace '\{Version\}',   $verStr
+  $result  = $result -replace '\{Edition\}',   $edStr
+  $result  = $result -replace '\{Languages\}', $langStr
+  $result  = $result -replace '\{FoD\}',       $fodStr
+  $result  = $result -replace '\{Date\}',      (Get-Date -Format 'yyyy-MM-dd')
+  $result  = $result -replace ' {2,}', ' '   # collapse runs of spaces left by empty variables
+  $result  = $result.Trim()
+  return $result
+}
+
+function Update-SCCMPreview {
+  if ($LblSCCMPreview) {
+    $LblSCCMPreview.Text = Resolve-SCCMNameTemplate
+  }
+  Update-SCCMSummary
+}
+
+function Update-SCCMSummary {
+  if (-not $RtbSCCMSummary) { return }
+  $pkgName = Resolve-SCCMNameTemplate
+  if (-not $pkgName) { $pkgName = "(empty)" }
+  $mode = if ($RadSCCMUpdate.Checked) {
+    $id = $TxtSCCMPackageID.Text.Trim()
+    if ($id) { "Update existing package ($id)" } else { "Update existing package (no ID set)" }
+  } else { "Create new package" }
+  $dps = if ($ChkSCCMUpdateDPs.Checked) { "Yes" } else { "No" }
+
+  $RtbSCCMSummary.Clear()
+  $colWhite = [System.Drawing.Color]::White
+  $colGreen = [System.Drawing.Color]::FromArgb(0, 200, 80)
+
+  # Helper: append text in a given colour
+  $appendColour = {
+    param([string]$text, [System.Drawing.Color]$col)
+    $start = $RtbSCCMSummary.TextLength
+    $RtbSCCMSummary.AppendText($text)
+    $RtbSCCMSummary.Select($start, $text.Length)
+    $RtbSCCMSummary.SelectionColor = $col
+  }
+  & $appendColour "Package name:  " $colWhite
+  & $appendColour "$pkgName`r`n"    $colGreen
+  & $appendColour "Mode:  "         $colWhite
+  & $appendColour "$mode`r`n"       $colGreen
+  & $appendColour "Update DPs:  "   $colWhite
+  & $appendColour $dps              $colGreen
+  $RtbSCCMSummary.Select(0, 0)
+}
+
+function Invoke-SCCMImport {
+  param([string]$WimPath)
+  $server    = $TxtSCCMServer.Text.Trim()
+  $siteCode  = $TxtSCCMSiteCode.Text.Trim().ToUpper()
+  $pkgPath   = $TxtSCCMPath.Text.Trim()
+  $pkgName   = Resolve-SCCMNameTemplate
+  $version   = if ($Script:EditionTag) { $Script:EditionTag } else { "" }
+  $comment   = $TxtSCCMComment.Text.Trim()
+  $updateDPs = $ChkSCCMUpdateDPs.Checked
+  $modeUpdate = $RadSCCMUpdate.Checked
+  $packageID  = $TxtSCCMPackageID.Text.Trim()
+
+  if (-not $server -or -not $siteCode -or -not $pkgPath -or -not $pkgName) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "Please complete all required SCCM fields:`nServer, Site Code, Package Storage Path, and Package Name.",
+      "Missing SCCM Settings", "OK", "Warning") | Out-Null
+    $Tabs.SelectedTab = $TabSCCM
+    return $false
+  }
+  if (-not (Test-Path $WimPath)) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "WIM file not found:`n$WimPath`n`nSelect the correct path in the SCCM tab.",
+      "WIM Not Found", "OK", "Warning") | Out-Null
+    $Tabs.SelectedTab = $TabSCCM
+    return $false
+  }
+
+  try {
+    # --- Move WIM to package storage path if not already there ---------------
+    $wimLeaf    = Split-Path $WimPath -Leaf
+    $fullSource = "$pkgPath\$wimLeaf"
+
+    $srcResolved = [System.IO.Path]::GetFullPath($WimPath).TrimEnd('\')
+    $dstResolved = [System.IO.Path]::GetFullPath($fullSource).TrimEnd('\')
+
+    if ($srcResolved -ne $dstResolved) {
+      # Ensure destination folder exists (it should, but be safe)
+      if (-not (Test-Path $pkgPath)) {
+        [System.Windows.Forms.MessageBox]::Show(
+          "Package storage path not found or not accessible:`n$pkgPath`n`nEnsure the UNC path exists and you have write access.",
+          "SCCM Import Error", "OK", "Error") | Out-Null
+        return $false
+      }
+      # Remove stale destination file if present (e.g. previous month's build)
+      if (Test-Path $fullSource) { Remove-Item $fullSource -Force -ErrorAction Stop }
+      try {
+        Move-Item -Path $WimPath -Destination $fullSource -ErrorAction Stop
+      } catch {
+        # If the move failed but the file is already at the destination (local path
+        # and UNC path resolve to the same folder), treat it as success.
+        if (Test-Path $fullSource) { <# same underlying file - continue #> }
+        else { throw }
+      }
+    }
+    # -------------------------------------------------------------------------
+
+    $modulePath = Join-Path $env:SMS_ADMIN_UI_PATH "..\ConfigurationManager.psd1"
+    Import-Module $modulePath -ErrorAction Stop
+    if (-not (Get-PSDrive -Name $siteCode -ErrorAction SilentlyContinue)) {
+      New-PSDrive -Name $siteCode -PSProvider CMSite -Root $server -ErrorAction Stop | Out-Null
+    }
+    Push-Location "$siteCode`:\"
+
+    if ($modeUpdate -and $packageID) {
+      Set-CMOperatingSystemImage -Id $packageID `
+          -Path        $fullSource `
+          -NewName     $pkgName `
+          -Version     $version `
+          -Description $comment `
+          -ErrorAction Stop
+      if ($updateDPs) {
+        Update-CMDistributionPoint -OperatingSystemImageId $packageID -ErrorAction SilentlyContinue
+      }
+    } else {
+      $newPkg = New-CMOperatingSystemImage `
+          -Name        $pkgName `
+          -Path        $fullSource `
+          -Version     $version `
+          -Description $comment `
+          -ErrorAction Stop
+      if ($updateDPs) {
+        Update-CMDistributionPoint -OperatingSystemImageId $newPkg.PackageID -ErrorAction SilentlyContinue
+      }
+    }
+    Pop-Location
+    return $true
+  } catch {
+    Pop-Location -ErrorAction SilentlyContinue
+    [System.Windows.Forms.MessageBox]::Show(
+      "SCCM import failed:`n`n$($_.Exception.Message)`n`nCheck server name, site code, and that you have Full Administrator rights in SCCM.",
+      "SCCM Import Error", "OK", "Error") | Out-Null
+    return $false
+  }
+}
+
+# -- CM module availability check (run once at form startup) -------------------
+$Script:SCCMModuleAvailable = $false
+$Script:SCCMModulePath      = ""
+if ($env:SMS_ADMIN_UI_PATH) {
+  $Script:SCCMModulePath = Join-Path $env:SMS_ADMIN_UI_PATH "..\ConfigurationManager.psd1"
+  $Script:SCCMModuleAvailable = (Test-Path $Script:SCCMModulePath)
+}
+
+# -- Layout colours ------------------------------------------------------------
+$ColSCCMSection  = [System.Drawing.Color]::FromArgb(50, 50, 50)   # section panel bg - slightly lighter than tab
+$ColSCCMHeader   = [System.Drawing.Color]::FromArgb(36, 36, 36)   # heading strip - slightly darker than tab
+
+# Helper: create a section background panel on the tab
+function New-SCCMSection {
+  param([int]$Y, [int]$Height)
+  $p = New-Object System.Windows.Forms.Panel
+  $p.Location  = New-Object System.Drawing.Point(6, $Y)
+  $p.Size      = New-Object System.Drawing.Size(706, $Height)
+  $p.BackColor = $ColSCCMSection
+  $TabSCCM.Controls.Add($p)
+  return $p
+}
+
+# Helper: section heading label directly on the tab (above the panel)
+function New-SCCMHeading {
+  param([string]$Text, [int]$Y)
+  $strip = New-Object System.Windows.Forms.Panel
+  $strip.Location  = New-Object System.Drawing.Point(6, $Y)
+  $strip.Size      = New-Object System.Drawing.Size(706, 26)
+  $strip.BackColor = $ColSCCMSection
+  $TabSCCM.Controls.Add($strip)
+  $l = New-Object System.Windows.Forms.Label
+  $l.Text      = $Text
+  $l.Font      = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+  $l.ForeColor = $ColAccent
+  $l.Location  = New-Object System.Drawing.Point(8, 4)
+  $l.AutoSize  = $true
+  $strip.Controls.Add($l)
+  return $strip
+}
+
+# Helper: label inside a section panel
+function New-PLabel {
+  param([System.Windows.Forms.Panel]$Panel, [string]$Text, [int]$X, [int]$Y, [bool]$Small = $false)
+  $l = New-Object System.Windows.Forms.Label
+  $l.Text      = $Text
+  $l.Font      = if ($Small) { $FontSmall } else { $FontMain }
+  $l.ForeColor = $ColFg
+  $l.Location  = New-Object System.Drawing.Point($X, $Y)
+  $l.AutoSize  = $true
+  $Panel.Controls.Add($l)
+  return $l
+}
+
+# Helper: textbox inside a section panel
+function New-PTextBox {
+  param([System.Windows.Forms.Panel]$Panel, [int]$X, [int]$Y, [int]$Width)
+  $t = New-Object System.Windows.Forms.TextBox
+  $t.Location    = New-Object System.Drawing.Point($X, $Y)
+  $t.Size        = New-Object System.Drawing.Size($Width, 20)
+  $t.BackColor   = [System.Drawing.Color]::FromArgb(62, 62, 62)
+  $t.ForeColor   = $ColFg
+  $t.BorderStyle = "FixedSingle"
+  $t.Font        = $FontMain
+  $Panel.Controls.Add($t)
+  return $t
+}
+
+# Helper: subtext hint label inside a section panel
+function New-PHint {
+  param([System.Windows.Forms.Panel]$Panel, [string]$Text, [int]$X, [int]$Y, [int]$Width = 680)
+  $l = New-Object System.Windows.Forms.Label
+  $l.Text      = $Text
+  $l.Font      = $FontSmall
+  $l.ForeColor = $ColSubtext
+  $l.Location  = New-Object System.Drawing.Point($X, $Y)
+  $l.Size      = New-Object System.Drawing.Size($Width, 28)
+  $Panel.Controls.Add($l)
+  return $l
+}
+
+# ==============================================================================
+# CM module status bar - sits at top of tab, full width, no section panel
+# ==============================================================================
+$sy = 8
+
+$LblSCCMModuleCheck = New-Object System.Windows.Forms.Label
+$LblSCCMModuleCheck.Font     = $FontSmall
+$LblSCCMModuleCheck.Location = New-Object System.Drawing.Point(10, $sy)
+$LblSCCMModuleCheck.AutoSize = $true
+if ($Script:SCCMModuleAvailable) {
+  $LblSCCMModuleCheck.Text      = [char]0x2714 + "  ConfigurationManager module found  -  SCCM import available"
+  $LblSCCMModuleCheck.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+} else {
+  $LblSCCMModuleCheck.Text      = [char]0x2718 + "  ConfigurationManager module not found  -  install the SCCM/MECM console on this machine  (hover for details)"
+  $LblSCCMModuleCheck.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+}
+$Script:SCCMModuleTip = New-Object System.Windows.Forms.ToolTip
+$Script:SCCMModuleTip.SetToolTip($LblSCCMModuleCheck,
+  "WIM Wizard uses the ConfigurationManager PowerShell module to import OS Image packages into SCCM/MECM.`r`n" +
+  "This module is installed as part of the SCCM/MECM Administration Console.`r`n`r`n" +
+  "If not found: install the SCCM console on this machine, then restart WIM Wizard.`r`n" +
+  "The console version must match your site server version.`r`n`r`n" +
+  "Without the CM module, all tab fields are saved to registry and passed to WimWizard.ps1,`r`n" +
+  "but the Test Connection and Import buttons are disabled.")
+$TabSCCM.Controls.Add($LblSCCMModuleCheck)
+$sy += 28
+
+# ==============================================================================
+# SECTION 1 - Site server connection
+# ==============================================================================
+New-SCCMHeading "  Site server connection" $sy | Out-Null
+$sy += 24
+
+$Sec1 = New-SCCMSection $sy 80
+$py   = 10   # internal Y within section panel
+
+# Server FQDN
+New-PLabel $Sec1 "Server (FQDN):" 10 ($py + 3) | Out-Null
+$TxtSCCMServer = New-PTextBox $Sec1 110 $py 272
+$TxtSCCMServer.Text = ""
+$TxtSCCMServer.Add_TextChanged({ Update-SCCMSummary })
+
+# Site code
+New-PLabel $Sec1 "Site code:" 394 ($py + 3) | Out-Null
+$TxtSCCMSiteCode = New-PTextBox $Sec1 462 $py 55
+$TxtSCCMSiteCode.Text            = ""
+$TxtSCCMSiteCode.CharacterCasing = "Upper"
+$TxtSCCMSiteCode.Add_TextChanged({ Update-SCCMSummary })
+
+# Test connection button
+$BtnSCCMTest = New-Object System.Windows.Forms.Button
+$BtnSCCMTest.Text      = "Test connection"
+$BtnSCCMTest.Location  = New-Object System.Drawing.Point(530, $py)
+$BtnSCCMTest.Size      = New-Object System.Drawing.Size(130, 22)
+$BtnSCCMTest.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnSCCMTest.ForeColor = $ColFg
+$BtnSCCMTest.FlatStyle = "Flat"
+$BtnSCCMTest.Font      = $FontSmall
+$BtnSCCMTest.Enabled   = $Script:SCCMModuleAvailable
+$Sec1.Controls.Add($BtnSCCMTest)
+$py += 32
+
+# Status label
+$LblSCCMStatus = New-Object System.Windows.Forms.Label
+$LblSCCMStatus.Text      = "Not tested"
+$LblSCCMStatus.Font      = $FontSmall
+$LblSCCMStatus.ForeColor = $ColSubtext
+$LblSCCMStatus.Location  = New-Object System.Drawing.Point(10, $py)
+$LblSCCMStatus.AutoSize  = $true
+$Sec1.Controls.Add($LblSCCMStatus)
+
+$BtnSCCMTest.Add_Click({
+  $server   = $TxtSCCMServer.Text.Trim()
+  $siteCode = $TxtSCCMSiteCode.Text.Trim().ToUpper()
+  if (-not $server -or -not $siteCode) {
+    $LblSCCMStatus.Text      = "Enter server FQDN and site code first."
+    $LblSCCMStatus.ForeColor = $ColWarn
+    return
+  }
+  $LblSCCMStatus.Text      = "Testing..."
+  $LblSCCMStatus.ForeColor = $ColSubtext
+  $Sec1.Refresh()
+  try {
+    Import-Module $Script:SCCMModulePath -ErrorAction Stop
+    if (-not (Get-PSDrive -Name $siteCode -ErrorAction SilentlyContinue)) {
+      New-PSDrive -Name $siteCode -PSProvider CMSite -Root $server -ErrorAction Stop | Out-Null
+    }
+    Push-Location "$siteCode`:\" -ErrorAction Stop
+    Pop-Location
+    $LblSCCMStatus.Text      = [char]0x2714 + "  Connected to $siteCode on $server"
+    $LblSCCMStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+  } catch {
+    $LblSCCMStatus.Text      = [char]0x2718 + "  Failed: $($_.Exception.Message)"
+    $LblSCCMStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+  }
+})
+
+$sy += 80 + 12   # section height + gap
+
+# ==============================================================================
+# SECTION 2 - Package details
+# ==============================================================================
+New-SCCMHeading "  Package details" $sy | Out-Null
+$sy += 26
+
+$Sec2 = New-SCCMSection $sy 280
+$py   = 10
+
+# Package storage path
+New-PLabel $Sec2 "Package storage path (UNC):" 14 ($py + 3) | Out-Null
+$TxtSCCMPath = New-PTextBox $Sec2 198 $py 400
+$TxtSCCMPath.Text = ""
+$TxtSCCMPath.Add_TextChanged({ Update-SCCMSummary })
+
+$BtnBrowseSCCMPath = New-Object System.Windows.Forms.Button
+$BtnBrowseSCCMPath.Text      = "Browse..."
+$BtnBrowseSCCMPath.Location  = New-Object System.Drawing.Point(604, $py)
+$BtnBrowseSCCMPath.Size      = New-Object System.Drawing.Size(80, 20)
+$BtnBrowseSCCMPath.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowseSCCMPath.ForeColor = $ColFg
+$BtnBrowseSCCMPath.FlatStyle = "Flat"
+$BtnBrowseSCCMPath.Font      = $FontSmall
+$BtnBrowseSCCMPath.Add_Click({
+  # FolderBrowserDialog cannot navigate to UNC paths reliably.
+  # Use SaveFileDialog with ValidateNames/CheckFileExists off so the user can
+  # type or navigate to a UNC folder; we strip the dummy filename afterwards.
+  $dlg = New-Object System.Windows.Forms.SaveFileDialog
+  $dlg.Title            = "Select the package storage folder (UNC paths supported)"
+  $dlg.Filter           = "Folder|*.THIS_IS_A_FOLDER_PICKER"
+  $dlg.FileName         = "Select folder here"
+  $dlg.ValidateNames    = $false
+  $dlg.CheckFileExists  = $false
+  $dlg.CheckPathExists  = $false
+  if ($TxtSCCMPath.Text) { $dlg.InitialDirectory = $TxtSCCMPath.Text }
+  if ($dlg.ShowDialog() -eq "OK") {
+    $TxtSCCMPath.Text = [System.IO.Path]::GetDirectoryName($dlg.FileName)
+  }
+})
+$Sec2.Controls.Add($BtnBrowseSCCMPath)
+$py += 26
+
+New-PHint $Sec2 "Must be a UNC path (\\server\share\folder) accessible by the SCCM computer account, not just the current user." 14 $py 670 | Out-Null
+$py += 30
+
+# Package name template
+# Package name template label - blue non-bold like section sub-headings
+$LblSCCMNameTemplateLbl = New-Object System.Windows.Forms.Label
+$LblSCCMNameTemplateLbl.Text      = "Package name template:"
+$LblSCCMNameTemplateLbl.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Regular)
+$LblSCCMNameTemplateLbl.ForeColor = $ColAccent
+$LblSCCMNameTemplateLbl.Location  = New-Object System.Drawing.Point(14, ($py + 3))
+$LblSCCMNameTemplateLbl.AutoSize  = $true
+$Sec2.Controls.Add($LblSCCMNameTemplateLbl)
+$py += 24
+
+$TxtSCCMNameTemplate = New-PTextBox $Sec2 14 $py 616
+$TxtSCCMNameTemplate.Text = "Windows 11 {Version} {Languages} {FoD} {Date}"
+$TxtSCCMNameTemplate.Add_TextChanged({ Update-SCCMPreview })
+$py += 26
+
+# Variable buttons - toggle insert/remove, 1px margin above/below
+$py += 1
+$varBtnX = 14
+foreach ($vn in @("{Version}", "{Edition}", "{Languages}", "{FoD}", "{Date}")) {
+  $vb = New-Object System.Windows.Forms.Button
+  $vb.Text      = $vn
+  $vb.Font      = $FontSmall
+  $vb.Size      = New-Object System.Drawing.Size(94, 20)
+  $vb.Location  = New-Object System.Drawing.Point($varBtnX, $py)
+  $vb.BackColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
+  $vb.ForeColor = $ColFg
+  $vb.FlatStyle = "Flat"
+  $vb.Tag       = $vn
+  $vb.Add_Click({
+    $token = $this.Tag
+    $cur   = $TxtSCCMNameTemplate.Text
+    if ($cur -match [regex]::Escape($token)) {
+      # Already present - remove it and tidy spaces
+      $TxtSCCMNameTemplate.Text = ($cur -replace (' ?' + [regex]::Escape($token) + ' ?'), ' ').Trim() -replace ' {2,}',' '
+    } else {
+      # Not present - always append at end with a space separator
+      $TxtSCCMNameTemplate.Text = ($cur.TrimEnd() + ' ' + $token).Trim() -replace ' {2,}',' '
+    }
+    $TxtSCCMNameTemplate.SelectionStart  = $TxtSCCMNameTemplate.Text.Length
+    $TxtSCCMNameTemplate.SelectionLength = 0
+    $TxtSCCMNameTemplate.Focus()
+  })
+  $Sec2.Controls.Add($vb)
+  $varBtnX += 100
+}
+$py += 21   # 20px button + 1px margin below
+
+# Package Name Preview
+$LblSCCMPreviewCaption = New-Object System.Windows.Forms.Label
+$LblSCCMPreviewCaption.Text      = "Package Name Preview:"
+$LblSCCMPreviewCaption.Font      = $FontSmall
+$LblSCCMPreviewCaption.ForeColor = $ColSubtext
+$LblSCCMPreviewCaption.Location  = New-Object System.Drawing.Point(14, ($py + 3))
+$LblSCCMPreviewCaption.AutoSize  = $true
+$Sec2.Controls.Add($LblSCCMPreviewCaption)
+
+$LblSCCMPreview = New-Object System.Windows.Forms.Label
+$LblSCCMPreview.Text         = ""
+$LblSCCMPreview.Font         = $FontSmall
+$LblSCCMPreview.ForeColor    = [System.Drawing.Color]::FromArgb(0, 200, 80)
+$LblSCCMPreview.Location     = New-Object System.Drawing.Point(148, ($py + 3))
+$LblSCCMPreview.Size         = New-Object System.Drawing.Size(540, 18)
+$LblSCCMPreview.AutoEllipsis = $true
+$Sec2.Controls.Add($LblSCCMPreview)
+$py += 26
+
+# Comment
+New-PLabel $Sec2 "Comment (optional):" 14 ($py + 3) | Out-Null
+$TxtSCCMComment = New-PTextBox $Sec2 148 $py 540
+$TxtSCCMComment.Text = ""
+$py += 30
+
+# Import options sub-heading inside Package details panel
+$sep = New-Object System.Windows.Forms.Panel
+$sep.Location  = New-Object System.Drawing.Point(14, $py)
+$sep.Size      = New-Object System.Drawing.Size(674, 1)
+$sep.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$Sec2.Controls.Add($sep)
+$py += 8
+
+$LblImportOptions = New-Object System.Windows.Forms.Label
+$LblImportOptions.Text      = "Image Building Options"
+$LblImportOptions.Font      = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+$LblImportOptions.ForeColor = $ColAccent
+$LblImportOptions.Location  = New-Object System.Drawing.Point(14, $py)
+$LblImportOptions.AutoSize  = $true
+$Sec2.Controls.Add($LblImportOptions)
+$py += 22
+
+$ChkSCCMAutoImport = New-DarkCheckbox -Text "Automatically import into SCCM after build completes" -Checked $false
+$ChkSCCMAutoImport.Location  = New-Object System.Drawing.Point(14, $py)
+$ChkSCCMAutoImport.Width     = 500
+$ChkSCCMAutoImport.BackColor = [System.Drawing.Color]::Transparent
+$ChkSCCMAutoImport.Add_CheckedChanged({
+  $manual = -not $ChkSCCMAutoImport.Checked
+  $TxtSCCMWimPath.Enabled   = $manual
+  $BtnBrowseSCCMWim.Enabled = $manual
+  $TxtSCCMWimPath.BackColor = if ($manual) { [System.Drawing.Color]::FromArgb(62,62,62) } else { [System.Drawing.Color]::FromArgb(45,45,45) }
+})
+$Sec2.Controls.Add($ChkSCCMAutoImport)
+$py += 26
+
+$ChkSCCMUpdateDPs = New-DarkCheckbox -Text "Update distribution points after import" -Checked $false
+$ChkSCCMUpdateDPs.Location  = New-Object System.Drawing.Point(14, $py)
+$ChkSCCMUpdateDPs.Width     = 400
+$ChkSCCMUpdateDPs.BackColor = [System.Drawing.Color]::Transparent
+$ChkSCCMUpdateDPs.Add_CheckedChanged({ Update-SCCMSummary })
+$Sec2.Controls.Add($ChkSCCMUpdateDPs)
+
+$sy += 280 + 12
+
+# ==============================================================================
+# SECTION 3 - Import mode (part of Image Building Options)
+# ==============================================================================
+$Sec3 = New-SCCMSection $sy 100
+$py   = 10
+
+$RadSCCMCreate = New-Object System.Windows.Forms.RadioButton
+$RadSCCMCreate.Text      = "Create new OS Image package each time"
+$RadSCCMCreate.Checked   = $true
+$RadSCCMCreate.ForeColor = $ColFg
+$RadSCCMCreate.BackColor = [System.Drawing.Color]::Transparent
+$RadSCCMCreate.Font      = $FontMain
+$RadSCCMCreate.AutoSize  = $true
+$RadSCCMCreate.Location  = New-Object System.Drawing.Point(14, $py)
+$RadSCCMCreate.Add_CheckedChanged({ $TxtSCCMPackageID.Enabled = $RadSCCMUpdate.Checked; if ($LblSCCMPkgStatus) { $LblSCCMPkgStatus.Visible = $false }; Update-SCCMSummary })
+$Sec3.Controls.Add($RadSCCMCreate)
+$py += 28
+
+$RadSCCMUpdate = New-Object System.Windows.Forms.RadioButton
+$RadSCCMUpdate.Text      = "Replace existing package  ID:"
+$RadSCCMUpdate.Checked   = $false
+$RadSCCMUpdate.ForeColor = $ColFg
+$RadSCCMUpdate.BackColor = [System.Drawing.Color]::Transparent
+$RadSCCMUpdate.Font      = $FontMain
+$RadSCCMUpdate.AutoSize  = $true
+$RadSCCMUpdate.Location  = New-Object System.Drawing.Point(14, $py)
+$RadSCCMUpdate.Add_CheckedChanged({ $TxtSCCMPackageID.Enabled = $RadSCCMUpdate.Checked; Update-SCCMSummary })
+$Sec3.Controls.Add($RadSCCMUpdate)
+
+$TxtSCCMPackageID = New-PTextBox $Sec3 228 $py 90
+$TxtSCCMPackageID.Text            = ""
+$TxtSCCMPackageID.Enabled         = $false
+$TxtSCCMPackageID.MaxLength       = 8
+$TxtSCCMPackageID.CharacterCasing = "Upper"
+$TxtSCCMPackageID.Add_TextChanged({
+  Update-SCCMSummary
+  # Validate package exists when all 8 characters are entered
+  $id = $TxtSCCMPackageID.Text.Trim()
+  if ($id.Length -eq 8 -and $Script:SCCMModuleAvailable -and $RadSCCMUpdate.Checked) {
+    try {
+      if (-not (Get-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -ErrorAction SilentlyContinue)) {
+        Import-Module $Script:SCCMModulePath -ErrorAction Stop
+        New-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -PSProvider CMSite -Root $TxtSCCMServer.Text.Trim() -ErrorAction Stop | Out-Null
+      }
+      Push-Location "$($TxtSCCMSiteCode.Text.Trim())`:\" -ErrorAction Stop
+      $pkg = Get-CMOperatingSystemImage -Id $id -ErrorAction SilentlyContinue
+      Pop-Location
+      if ($pkg) {
+        $LblSCCMPkgStatus.Text      = [char]0x2714 + "  Found: $($pkg.Name)"
+        $LblSCCMPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+      } else {
+        $LblSCCMPkgStatus.Text      = [char]0x2718 + "  Package $id not found in SCCM"
+        $LblSCCMPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+      }
+    } catch {
+      $LblSCCMPkgStatus.Text      = [char]0x2718 + "  Could not verify: $($_.Exception.Message)"
+      $LblSCCMPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+    }
+    $LblSCCMPkgStatus.Visible = $true
+  } elseif ($id.Length -lt 8) {
+    $LblSCCMPkgStatus.Visible = $false
+  }
+})
+$py += 26
+
+# Package ID validation status label (hidden until 8 chars entered)
+$LblSCCMPkgStatus = New-Object System.Windows.Forms.Label
+$LblSCCMPkgStatus.Text      = ""
+$LblSCCMPkgStatus.Font      = $FontSmall
+$LblSCCMPkgStatus.ForeColor = $ColSubtext
+$LblSCCMPkgStatus.Location  = New-Object System.Drawing.Point(324, ($py - 24))
+$LblSCCMPkgStatus.AutoSize  = $true
+$LblSCCMPkgStatus.Visible   = $false
+$Sec3.Controls.Add($LblSCCMPkgStatus)
+
+New-PHint $Sec3 "Find Package ID in SCCM: Software Library -> Operating Systems -> Operating System Images -> right-click -> Properties -> General." 32 $py 660 | Out-Null
+
+$sy += 100 + 12
+
+# ==============================================================================
+# SECTION 4 - Manual import
+# ==============================================================================
+New-SCCMHeading "  Manual import with settings above" $sy | Out-Null
+$sy += 26
+
+$Sec4 = New-SCCMSection $sy 162
+$py   = 8
+
+# Live summary - RichTextBox for mixed-colour text (white labels, green values)
+$RtbSCCMSummary = New-Object System.Windows.Forms.RichTextBox
+$RtbSCCMSummary.Location    = New-Object System.Drawing.Point(14, $py)
+$RtbSCCMSummary.Size        = New-Object System.Drawing.Size(670, 48)
+$RtbSCCMSummary.Font        = $FontSmall
+$RtbSCCMSummary.BackColor   = $ColSCCMSection
+$RtbSCCMSummary.ForeColor   = $ColFg
+$RtbSCCMSummary.BorderStyle = "None"
+$RtbSCCMSummary.ReadOnly    = $true
+$RtbSCCMSummary.TabStop     = $false
+$RtbSCCMSummary.Cursor      = [System.Windows.Forms.Cursors]::Default
+$Sec4.Controls.Add($RtbSCCMSummary)
+$py += 52
+
+# Separator between summary and action row
+$sepAction = New-Object System.Windows.Forms.Panel
+$sepAction.Location  = New-Object System.Drawing.Point(14, $py)
+$sepAction.Size      = New-Object System.Drawing.Size(674, 1)
+$sepAction.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$Sec4.Controls.Add($sepAction)
+$py += 10
+
+New-PLabel $Sec4 "Import WIM manually:" 14 ($py + 3) | Out-Null
+
+$TxtSCCMWimPath = New-PTextBox $Sec4 152 $py 380
+$TxtSCCMWimPath.Text = ""
+
+$BtnBrowseSCCMWim = New-Object System.Windows.Forms.Button
+$BtnBrowseSCCMWim.Text      = "Browse..."
+$BtnBrowseSCCMWim.Location  = New-Object System.Drawing.Point(538, $py)
+$BtnBrowseSCCMWim.Size      = New-Object System.Drawing.Size(100, 22)
+$BtnBrowseSCCMWim.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowseSCCMWim.ForeColor = $ColFg
+$BtnBrowseSCCMWim.FlatStyle = "Flat"
+$BtnBrowseSCCMWim.Add_Click({
+  $dlg = New-Object System.Windows.Forms.OpenFileDialog
+  $dlg.Title  = "Select WIM file to import into SCCM"
+  $dlg.Filter = "WIM files (*.wim)|*.wim"
+  $dlg.InitialDirectory = "$ScriptRoot\Output"
+  if ($dlg.ShowDialog() -eq "OK") { $TxtSCCMWimPath.Text = $dlg.FileName }
+})
+$Sec4.Controls.Add($BtnBrowseSCCMWim)
+$py += 30
+
+$BtnSCCMImport = New-Object System.Windows.Forms.Button
+$BtnSCCMImport.Text      = "Manual Import"
+$BtnSCCMImport.Location  = New-Object System.Drawing.Point(14, $py)
+$BtnSCCMImport.Size      = New-Object System.Drawing.Size(120, 24)
+$BtnSCCMImport.BackColor = $ColAccent
+$BtnSCCMImport.ForeColor = $ColFg
+$BtnSCCMImport.FlatStyle = "Flat"
+$BtnSCCMImport.Font      = $FontBold
+$BtnSCCMImport.Enabled   = $Script:SCCMModuleAvailable
+$BtnSCCMImport.Add_Click({
+  $wim = $TxtSCCMWimPath.Text.Trim()
+  if (-not $wim) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "No WIM file specified. Select or browse to a WIM file first.",
+      "No WIM Selected", "OK", "Warning") | Out-Null
+    return
+  }
+  $ok = Invoke-SCCMImport -WimPath $wim
+  if ($ok) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "SCCM import completed successfully.",
+      "Import Complete", "OK", "Information") | Out-Null
+  }
+})
+$Sec4.Controls.Add($BtnSCCMImport)
+# Sec4 height 77px = 10 top + 22 WIM row + 12 gap + 28 button + 5 bottom breathing
+
+# Note: language and FoD checkbox changes already trigger Update-UI, which
+# calls Update-SCCMPreview internally - no additional wiring needed here.
+
+# ==============================================================================
+# TAB 6 - PATCH WIM
+# ==============================================================================
+$TabPatchWim = New-Tab "  Patch WIM"
+
+# ---- Intro text ---------------------------------------------------------------
+$PatchIntro = New-Object System.Windows.Forms.Label
+$PatchIntro.Location  = New-Object System.Drawing.Point(10, 8)
+$PatchIntro.Size      = New-Object System.Drawing.Size(716, 34)
+$PatchIntro.BackColor = $ColPanel
+$PatchIntro.ForeColor = $ColFg
+$PatchIntro.Font      = $FontSmall
+$PatchIntro.Text      = "Patch an existing image without rebuilding from ISO. Recommended workflow: maintain an evaluation image and a production image, each in its own task sequence. When the evaluation image is approved, open the production task sequence in SCCM and swap in the updated image."
+$TabPatchWim.Controls.Add($PatchIntro)
+
+# ---- Helper: section panel (same style as SCCM tab) --------------------------
+function New-PWSection { param($top, $height)
+  $p = New-Object System.Windows.Forms.Panel
+  $p.Location    = New-Object System.Drawing.Point(8, $top)
+  $p.Size        = New-Object System.Drawing.Size(718, $height)
+  $p.BackColor   = $ColSCCMSection
+  $p.BorderStyle = "None"
+  $TabPatchWim.Controls.Add($p)
+  return $p
+}
+
+$pwy = 48   # current Y below intro
+
+# ==============================================================================
+# PATCH WIM SECTION 1 - WIM source
+# ==============================================================================
+$LblPWSrc = New-Object System.Windows.Forms.Label
+$LblPWSrc.Text      = "  WIM source"
+$LblPWSrc.Font      = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+$LblPWSrc.ForeColor = $ColAccent
+$LblPWSrc.Location  = New-Object System.Drawing.Point(8, $pwy)
+$LblPWSrc.Size      = New-Object System.Drawing.Size(718, 22)
+$LblPWSrc.BackColor = [System.Drawing.Color]::FromArgb(35, 35, 35)
+$TabPatchWim.Controls.Add($LblPWSrc)
+$pwy += 26
+
+# Section: 10 top + 22 checkbox + 8 sep + 24 col-headers + 26 input row
+#        + 28 status label + 10 bottom = 128
+$PWSecSrc = New-PWSection $pwy 128
+$pp = 10
+
+# ---- Patch mode enable checkbox ----
+$ChkPatchMode = New-DarkCheckbox -Text "Enable patch mode  (no ISO needed -- languages and apps are read from the existing WIM)" -Checked $false
+$ChkPatchMode.Location  = New-Object System.Drawing.Point(14, $pp)
+$ChkPatchMode.Width     = 690
+$ChkPatchMode.BackColor = [System.Drawing.Color]::Transparent
+$PWSecSrc.Controls.Add($ChkPatchMode)
+$pp += 28
+
+# ---- Separator ----
+$PWColSep = New-Object System.Windows.Forms.Panel
+$PWColSep.Location  = New-Object System.Drawing.Point(14, $pp)
+$PWColSep.Size      = New-Object System.Drawing.Size(690, 1)
+$PWColSep.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$PWSecSrc.Controls.Add($PWColSep)
+$pp += 8
+
+# ---- Source toggle radios (column headers) ----
+$RadPWSrcSCCM = New-Object System.Windows.Forms.RadioButton
+$RadPWSrcSCCM.Text      = "From SCCM package"
+$RadPWSrcSCCM.Checked   = $true
+$RadPWSrcSCCM.ForeColor = $ColFg
+$RadPWSrcSCCM.BackColor = [System.Drawing.Color]::Transparent
+$RadPWSrcSCCM.Font      = $FontBold
+$RadPWSrcSCCM.AutoSize  = $true
+$RadPWSrcSCCM.Location  = New-Object System.Drawing.Point(14, $pp)
+$RadPWSrcSCCM.Enabled   = $false
+$PWSecSrc.Controls.Add($RadPWSrcSCCM)
+
+$RadPWSrcLocal = New-Object System.Windows.Forms.RadioButton
+$RadPWSrcLocal.Text      = "Local WIM file"
+$RadPWSrcLocal.Checked   = $false
+$RadPWSrcLocal.ForeColor = $ColFg
+$RadPWSrcLocal.BackColor = [System.Drawing.Color]::Transparent
+$RadPWSrcLocal.Font      = $FontBold
+$RadPWSrcLocal.AutoSize  = $true
+$RadPWSrcLocal.Location  = New-Object System.Drawing.Point(370, $pp)
+$RadPWSrcLocal.Enabled   = $false
+$PWSecSrc.Controls.Add($RadPWSrcLocal)
+$pp += 27
+
+# ---- Vertical divider between columns ----
+$PWVDiv = New-Object System.Windows.Forms.Panel
+$PWVDiv.Location  = New-Object System.Drawing.Point(355, ($pp - 4))
+$PWVDiv.Size      = New-Object System.Drawing.Size(1, 53)
+$PWVDiv.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$PWSecSrc.Controls.Add($PWVDiv)
+
+# ---- LEFT column: SCCM Package ID ----
+$LblPWPkgIDLbl = New-Object System.Windows.Forms.Label
+$LblPWPkgIDLbl.Text      = "Package ID:"
+$LblPWPkgIDLbl.Font      = $FontSmall
+$LblPWPkgIDLbl.ForeColor = $ColSubtext
+$LblPWPkgIDLbl.Location  = New-Object System.Drawing.Point(14, ($pp + 4))
+$LblPWPkgIDLbl.AutoSize  = $true
+$PWSecSrc.Controls.Add($LblPWPkgIDLbl)
+
+$TxtPatchWimPkgID = New-Object System.Windows.Forms.TextBox
+$TxtPatchWimPkgID.Location        = New-Object System.Drawing.Point(100, $pp)
+$TxtPatchWimPkgID.Size            = New-Object System.Drawing.Size(90, 22)
+$TxtPatchWimPkgID.BackColor       = [System.Drawing.Color]::FromArgb(62, 62, 62)
+$TxtPatchWimPkgID.ForeColor       = $ColFg
+$TxtPatchWimPkgID.BorderStyle     = "FixedSingle"
+$TxtPatchWimPkgID.MaxLength       = 8
+$TxtPatchWimPkgID.CharacterCasing = "Upper"
+$TxtPatchWimPkgID.Enabled         = $false
+$PWSecSrc.Controls.Add($TxtPatchWimPkgID)
+
+# ---- RIGHT column: Local WIM ----
+$TxtPatchWim = New-Object System.Windows.Forms.TextBox
+$TxtPatchWim.Location    = New-Object System.Drawing.Point(370, $pp)
+$TxtPatchWim.Size        = New-Object System.Drawing.Size(230, 22)
+$TxtPatchWim.BackColor   = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$TxtPatchWim.ForeColor   = $ColSubtext
+$TxtPatchWim.BorderStyle = "FixedSingle"
+$TxtPatchWim.Text        = "Select existing WIM file..."
+$TxtPatchWim.Enabled     = $false
+$PWSecSrc.Controls.Add($TxtPatchWim)
+
+$BtnBrowsePatch = New-Object System.Windows.Forms.Button
+$BtnBrowsePatch.Text      = "Browse..."
+$BtnBrowsePatch.Location  = New-Object System.Drawing.Point(606, $pp)
+$BtnBrowsePatch.Size      = New-Object System.Drawing.Size(86, 22)
+$BtnBrowsePatch.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowsePatch.ForeColor = $ColFg
+$BtnBrowsePatch.FlatStyle = "Flat"
+$BtnBrowsePatch.Enabled   = $false
+$BtnBrowsePatch.Add_Click({
+  $dlg = New-Object System.Windows.Forms.OpenFileDialog
+  $dlg.Title  = "Select existing WIM file to patch"
+  $dlg.Filter = "WIM files (*.wim)|*.wim"
+  $dlg.InitialDirectory = "$ScriptRoot\Output"
+  if ($dlg.ShowDialog() -eq "OK") {
+    $TxtPatchWim.Text = $dlg.FileName
+    Read-WimLanguages -WimPath $dlg.FileName
+    Update-UI
+  }
+})
+$PWSecSrc.Controls.Add($BtnBrowsePatch)
+$pp += 26
+
+# ---- Status label (spans left column, below Package ID) ----
+$LblPWPkgStatus = New-Object System.Windows.Forms.Label
+$LblPWPkgStatus.Text      = ""
+$LblPWPkgStatus.Font      = $FontSmall
+$LblPWPkgStatus.ForeColor = $ColSubtext
+$LblPWPkgStatus.Location  = New-Object System.Drawing.Point(14, $pp)
+$LblPWPkgStatus.Size      = New-Object System.Drawing.Size(330, 18)
+$LblPWPkgStatus.Visible   = $false
+$PWSecSrc.Controls.Add($LblPWPkgStatus)
+
+$TxtPatchWimPkgID.Add_TextChanged({
+  if (-not $ChkPatchMode.Checked) { return }
+  $id = $TxtPatchWimPkgID.Text.Trim()
+  $Script:PatchWimSCCMFileName = ""   # clear on every keystroke
+  if ($id.Length -eq 8 -and $Script:SCCMModuleAvailable) {
+    try {
+      if (-not (Get-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -ErrorAction SilentlyContinue)) {
+        Import-Module $Script:SCCMModulePath -ErrorAction Stop
+        New-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -PSProvider CMSite -Root $TxtSCCMServer.Text.Trim() -ErrorAction Stop | Out-Null
+      }
+      Push-Location "$($TxtSCCMSiteCode.Text.Trim())`:\" -ErrorAction Stop
+      $pkg = Get-CMOperatingSystemImage -Id $id -ErrorAction SilentlyContinue
+      Pop-Location
+      if ($pkg) {
+        $LblPWPkgStatus.Text      = [char]0x2714 + "  Found: $($pkg.Name)"
+        $LblPWPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+        $Script:PatchWimWritingPkgName = $true
+        $TxtPatchWimPkgName.Text = $pkg.Name
+        $Script:PatchWimWritingPkgName = $false
+
+        # Resolve WIM filename from package source path for command preview
+        $srcPath = $pkg.PkgSourcePath
+        if ($srcPath) {
+          if ($srcPath -match '\.(wim|esd)$') {
+            $Script:PatchWimSCCMFileName = [System.IO.Path]::GetFileName($srcPath)
+          } else {
+            $wim = Get-ChildItem -Path $srcPath -Filter "*.wim" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($wim) { $Script:PatchWimSCCMFileName = $wim.Name }
+          }
+        }
+      } else {
+        $LblPWPkgStatus.Text      = [char]0x2718 + "  Package $id not found in SCCM"
+        $LblPWPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+      }
+    } catch {
+      $LblPWPkgStatus.Text      = [char]0x2718 + "  Could not verify: $($_.Exception.Message)"
+      $LblPWPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+    }
+    $LblPWPkgStatus.Visible = $true
+    Update-UI   # refresh command preview with resolved WIM filename
+  } elseif ($id.Length -lt 8) {
+    $LblPWPkgStatus.Visible = $false
+  }
+})
+
+# ---- Source radio logic ----
+$RadPWSrcSCCM.Add_CheckedChanged({
+  if ($RadPWSrcSCCM.Checked -and $ChkPatchMode.Checked) {
+    # Enable SCCM column — restore status label visibility (colour preserved from last lookup)
+    $TxtPatchWimPkgID.Enabled      = $true
+    if ($LblPWPkgStatus.Text -ne "") { $LblPWPkgStatus.Visible = $true }
+    $TxtPatchWimPkgName.Enabled    = $true
+    $BtnPWDate.Enabled             = $true
+    $LblPWPkgPreview.ForeColor     = [System.Drawing.Color]::FromArgb(0, 200, 80)
+    $RadPatchWimReplace.Enabled    = $true
+    $RadPatchWimNew.Enabled        = $true
+    $LblPWActionHint.ForeColor     = $ColSubtext
+    # Disable Local WIM column
+    $TxtPatchWim.Enabled           = $false
+    $TxtPatchWim.ForeColor         = $ColSubtext
+    $BtnBrowsePatch.Enabled        = $false
+    $TxtPatchWimOutName.Enabled    = $false
+    $BtnPWWimDate.Enabled          = $false
+    $BtnPWBrowseOut.Enabled        = $false
+    $LblPWWimPreview.ForeColor     = $ColSubtext
+  }
+})
+$RadPWSrcLocal.Add_CheckedChanged({
+  if ($RadPWSrcLocal.Checked -and $ChkPatchMode.Checked) {
+    # Enable Local WIM column
+    $TxtPatchWim.Enabled           = $true
+    $TxtPatchWim.ForeColor         = $ColFg
+    $BtnBrowsePatch.Enabled        = $true
+    $TxtPatchWimOutName.Enabled    = $true
+    $BtnPWWimDate.Enabled          = $true
+    $BtnPWBrowseOut.Enabled        = $true
+    $LblPWWimPreview.ForeColor     = [System.Drawing.Color]::FromArgb(0, 200, 80)
+    # Disable SCCM column
+    $TxtPatchWimPkgID.Enabled      = $false
+    $LblPWPkgStatus.Visible        = $false
+    $TxtPatchWimPkgName.Enabled    = $false
+    $BtnPWDate.Enabled             = $false
+    $LblPWPkgPreview.ForeColor     = $ColSubtext
+    $RadPatchWimReplace.Enabled    = $false
+    $RadPatchWimNew.Enabled        = $false
+    $LblPWActionHint.ForeColor     = [System.Drawing.Color]::FromArgb(80, 80, 80)
+  }
+})
+
+# ---- Patch mode master toggle ----
+$ChkPatchMode.Add_CheckedChanged({
+  $on = $ChkPatchMode.Checked
+  $RadPWSrcSCCM.Enabled  = $on
+  $RadPWSrcLocal.Enabled = $on
+  if ($on) {
+    $TxtPatchWimPkgID.Enabled = $RadPWSrcSCCM.Checked
+    $TxtPatchWim.Enabled      = $RadPWSrcLocal.Checked
+    $BtnBrowsePatch.Enabled   = $RadPWSrcLocal.Checked
+    $TxtPatchWim.ForeColor    = if ($RadPWSrcLocal.Checked) { $ColFg } else { $ColSubtext }
+  } else {
+    $TxtPatchWimPkgID.Enabled = $false
+    $TxtPatchWim.Enabled      = $false
+    $BtnBrowsePatch.Enabled   = $false
+    $TxtPatchWim.ForeColor    = $ColSubtext
+  }
+  $TabLang.Enabled = -not $on
+  $TabApps.Enabled = -not $on
+  $TabFoD.Enabled  = -not $on
+  foreach ($chk in @($ChkSkipUpdates, $ChkSkipLPs, $ChkSkipAppx)) {
+    $chk.Enabled = -not $on
+    if ($on) { $chk.Checked = $false }
+  }
+  if ($on -and $RadPWSrcLocal.Checked -and $TxtPatchWim.Text -ne "Select existing WIM file..." -and (Test-Path $TxtPatchWim.Text)) {
+    Read-WimLanguages -WimPath $TxtPatchWim.Text
+  }
+  Update-UI
+  Update-RunButton
+})
+
+$TxtPatchWim.Add_TextChanged({
+  # Auto-populate output path from source filename if user hasn't manually set it
+  if ($Script:PatchWimOutNameFromSource -or $TxtPatchWimOutName.Text -eq "") {
+    $src = $TxtPatchWim.Text
+    if ($src -ne "Select existing WIM file..." -and $src -ne "") {
+      $Script:PatchWimOutNameFromSource = $true
+      $outName = [System.IO.Path]::GetFileName($src)
+      $TxtPatchWimOutName.Text = Join-Path $ScriptRoot "Output\$outName"
+    }
+  }
+  Update-UI
+})
+
+$pwy += 128 + 6
+
+# ==============================================================================
+# PATCH WIM SECTION 2 - Details & Action (two-column, no section heading bar)
+# Left  (x=14..348):  Package Name (stacked), preview, separator, Action radios, hint
+# Right (x=366..704): Output WIM (stacked), preview
+# Row heights: 16 label + 22 input+btn + 6 gap + 18 preview = 62; sep+8; 24+24 radios; 8+16 hint
+# Total inner: 10 + 16 + 22 + 6 + 18 + 8sep + 8 + 24 + 24 + 8 + 16 + 10 = 170
+# ==============================================================================
+$Script:PatchWimWritingPkgName   = $false
+$Script:PatchWimOutNameFromSource = $false
+$Script:PatchWimSCCMFileName      = ""   # WIM filename fetched from pkg source path (for command preview)
+
+$PWSecDetails = New-PWSection $pwy 231
+$pp = 10
+
+# ---- Vertical divider (full inner height) ----
+$PWVDiv2 = New-Object System.Windows.Forms.Panel
+$PWVDiv2.Location  = New-Object System.Drawing.Point(355, 6)
+$PWVDiv2.Size      = New-Object System.Drawing.Size(1, 199)
+$PWVDiv2.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$PWSecDetails.Controls.Add($PWVDiv2)
+
+# ---- LEFT row 1: Package Name label ----
+$LblPWPkgNameLbl = New-Object System.Windows.Forms.Label
+$LblPWPkgNameLbl.Text      = "Package Name:"
+$LblPWPkgNameLbl.Font      = $FontSmall
+$LblPWPkgNameLbl.ForeColor = $ColSubtext
+$LblPWPkgNameLbl.Location  = New-Object System.Drawing.Point(14, $pp)
+$LblPWPkgNameLbl.AutoSize  = $true
+$PWSecDetails.Controls.Add($LblPWPkgNameLbl)
+
+# ---- RIGHT row 1: Output path label ----
+$LblPWWimNameLbl = New-Object System.Windows.Forms.Label
+$LblPWWimNameLbl.Text      = "Output path:"
+$LblPWWimNameLbl.Font      = $FontSmall
+$LblPWWimNameLbl.ForeColor = $ColSubtext
+$LblPWWimNameLbl.Location  = New-Object System.Drawing.Point(366, $pp)
+$LblPWWimNameLbl.AutoSize  = $true
+$PWSecDetails.Controls.Add($LblPWWimNameLbl)
+
+$pp += 21
+
+# ---- LEFT row 2: Package Name textbox + {Date} ----
+$TxtPatchWimPkgName = New-Object System.Windows.Forms.TextBox
+$TxtPatchWimPkgName.Location    = New-Object System.Drawing.Point(14, $pp)
+$TxtPatchWimPkgName.Size        = New-Object System.Drawing.Size(270, 22)
+$TxtPatchWimPkgName.BackColor   = [System.Drawing.Color]::FromArgb(62, 62, 62)
+$TxtPatchWimPkgName.ForeColor   = $ColFg
+$TxtPatchWimPkgName.BorderStyle = "FixedSingle"
+$TxtPatchWimPkgName.Text        = ""
+$PWSecDetails.Controls.Add($TxtPatchWimPkgName)
+
+$BtnPWDate = New-Object System.Windows.Forms.Button
+$BtnPWDate.Text      = "{Date}"
+$BtnPWDate.Location  = New-Object System.Drawing.Point(290, $pp)
+$BtnPWDate.Size      = New-Object System.Drawing.Size(56, 22)
+$BtnPWDate.BackColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
+$BtnPWDate.ForeColor = $ColFg
+$BtnPWDate.FlatStyle = "Flat"
+$BtnPWDate.Font      = $FontSmall
+$BtnPWDate.Add_Click({
+  $box = $TxtPatchWimPkgName
+  $pos = $box.SelectionStart
+  $box.Text = $box.Text.Insert($pos, "{Date}")
+  $box.SelectionStart = $pos + 6
+  $box.Focus()
+})
+$PWSecDetails.Controls.Add($BtnPWDate)
+
+# ---- RIGHT row 2: Output path textbox (full right-column width) ----
+$TxtPatchWimOutName = New-Object System.Windows.Forms.TextBox
+$TxtPatchWimOutName.Location    = New-Object System.Drawing.Point(366, $pp)
+$TxtPatchWimOutName.Size        = New-Object System.Drawing.Size(332, 22)
+$TxtPatchWimOutName.BackColor   = [System.Drawing.Color]::FromArgb(62, 62, 62)
+$TxtPatchWimOutName.ForeColor   = $ColFg
+$TxtPatchWimOutName.BorderStyle = "FixedSingle"
+$TxtPatchWimOutName.Text        = ""
+$PWSecDetails.Controls.Add($TxtPatchWimOutName)
+
+$pp += 26
+
+# ---- RIGHT row 3: {Date} + Browse buttons ----
+$BtnPWWimDate = New-Object System.Windows.Forms.Button
+$BtnPWWimDate.Text      = "{Date}"
+$BtnPWWimDate.Location  = New-Object System.Drawing.Point(366, $pp)
+$BtnPWWimDate.Size      = New-Object System.Drawing.Size(56, 22)
+$BtnPWWimDate.BackColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
+$BtnPWWimDate.ForeColor = $ColFg
+$BtnPWWimDate.FlatStyle = "Flat"
+$BtnPWWimDate.Font      = $FontSmall
+$BtnPWWimDate.Add_Click({
+  $box = $TxtPatchWimOutName
+  $pos = $box.SelectionStart
+  $box.Text = $box.Text.Insert($pos, "{Date}")
+  $box.SelectionStart = $pos + 6
+  $box.Focus()
+})
+$PWSecDetails.Controls.Add($BtnPWWimDate)
+
+$BtnPWBrowseOut = New-Object System.Windows.Forms.Button
+$BtnPWBrowseOut.Text      = "Browse..."
+$BtnPWBrowseOut.Location  = New-Object System.Drawing.Point(428, $pp)
+$BtnPWBrowseOut.Size      = New-Object System.Drawing.Size(86, 22)
+$BtnPWBrowseOut.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnPWBrowseOut.ForeColor = $ColFg
+$BtnPWBrowseOut.FlatStyle = "Flat"
+$BtnPWBrowseOut.Enabled   = $false
+$BtnPWBrowseOut.Add_Click({
+  $dlg = New-Object System.Windows.Forms.SaveFileDialog
+  $dlg.Title  = "Choose output WIM path"
+  $dlg.Filter = "WIM files (*.wim)|*.wim"
+  $dlg.InitialDirectory = Join-Path $ScriptRoot "Output"
+  $dlg.FileName = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+  if ($dlg.ShowDialog() -eq "OK") {
+    $TxtPatchWimOutName.Text = $dlg.FileName
+    $Script:PatchWimOutNameFromSource = $false
+  }
+})
+$PWSecDetails.Controls.Add($BtnPWBrowseOut)
+
+$pp += 28
+
+# ---- LEFT row 3: Package name preview ----
+$LblPWPkgPreviewCap = New-Object System.Windows.Forms.Label
+$LblPWPkgPreviewCap.Text      = "Preview:"
+$LblPWPkgPreviewCap.Font      = $FontSmall
+$LblPWPkgPreviewCap.ForeColor = $ColSubtext
+$LblPWPkgPreviewCap.Location  = New-Object System.Drawing.Point(14, ($pp + 2))
+$LblPWPkgPreviewCap.AutoSize  = $true
+$PWSecDetails.Controls.Add($LblPWPkgPreviewCap)
+
+$LblPWPkgPreview = New-Object System.Windows.Forms.Label
+$LblPWPkgPreview.Text      = ""
+$LblPWPkgPreview.Font      = $FontSmall
+$LblPWPkgPreview.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+$LblPWPkgPreview.Location  = New-Object System.Drawing.Point(62, ($pp + 2))
+$LblPWPkgPreview.Size      = New-Object System.Drawing.Size(284, 16)
+$PWSecDetails.Controls.Add($LblPWPkgPreview)
+
+# ---- RIGHT row 4: WIM path preview ----
+$LblPWWimPreviewCap = New-Object System.Windows.Forms.Label
+$LblPWWimPreviewCap.Text      = "Preview:"
+$LblPWWimPreviewCap.Font      = $FontSmall
+$LblPWWimPreviewCap.ForeColor = $ColSubtext
+$LblPWWimPreviewCap.Location  = New-Object System.Drawing.Point(366, ($pp + 28))
+$LblPWWimPreviewCap.AutoSize  = $true
+$PWSecDetails.Controls.Add($LblPWWimPreviewCap)
+
+$LblPWWimPreview = New-Object System.Windows.Forms.Label
+$LblPWWimPreview.Text      = ""
+$LblPWWimPreview.Font      = $FontSmall
+$LblPWWimPreview.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+$LblPWWimPreview.Location  = New-Object System.Drawing.Point(414, ($pp + 28))
+$LblPWWimPreview.Size      = New-Object System.Drawing.Size(284, 32)
+$PWSecDetails.Controls.Add($LblPWWimPreview)
+
+$pp += 22
+
+# ---- Separator (left column only, doesn't cross into right) ----
+$PWDetSep = New-Object System.Windows.Forms.Panel
+$PWDetSep.Location  = New-Object System.Drawing.Point(14, $pp)
+$PWDetSep.Size      = New-Object System.Drawing.Size(338, 1)
+$PWDetSep.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+$PWSecDetails.Controls.Add($PWDetSep)
+$pp += 8
+
+# ---- LEFT: Action radios ----
+$RadPatchWimReplace = New-Object System.Windows.Forms.RadioButton
+$RadPatchWimReplace.Text      = "Replace existing package"
+$RadPatchWimReplace.Checked   = $true
+$RadPatchWimReplace.ForeColor = $ColFg
+$RadPatchWimReplace.BackColor = [System.Drawing.Color]::Transparent
+$RadPatchWimReplace.Font      = $FontMain
+$RadPatchWimReplace.AutoSize  = $true
+$RadPatchWimReplace.Location  = New-Object System.Drawing.Point(14, $pp)
+$PWSecDetails.Controls.Add($RadPatchWimReplace)
+$pp += 24
+
+$RadPatchWimNew = New-Object System.Windows.Forms.RadioButton
+$RadPatchWimNew.Text      = "Create new package"
+$RadPatchWimNew.Checked   = $false
+$RadPatchWimNew.ForeColor = $ColFg
+$RadPatchWimNew.BackColor = [System.Drawing.Color]::Transparent
+$RadPatchWimNew.Font      = $FontMain
+$RadPatchWimNew.AutoSize  = $true
+$RadPatchWimNew.Location  = New-Object System.Drawing.Point(14, $pp)
+$PWSecDetails.Controls.Add($RadPatchWimNew)
+$pp += 26
+
+# ---- Hint (left column only, hard width cap) ----
+$LblPWActionHint = New-Object System.Windows.Forms.Label
+$LblPWActionHint.Text      = "Click > Run. Action and Package Name apply to SCCM source only."
+$LblPWActionHint.Font      = $FontSmall
+$LblPWActionHint.ForeColor = $ColSubtext
+$LblPWActionHint.Location  = New-Object System.Drawing.Point(14, $pp)
+$LblPWActionHint.Size      = New-Object System.Drawing.Size(336, 16)
+$PWSecDetails.Controls.Add($LblPWActionHint)
+
+# ---- Wire up text-changed for previews ----
+$TxtPatchWimPkgName.Add_TextChanged({
+  if (-not $Script:PatchWimWritingPkgName) {
+    # user edit - preview updates, nothing else needed
+  }
+  $resolved = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+  $LblPWPkgPreview.Text = if ($resolved.Trim()) { $resolved } else { "" }
+  Update-UI
+})
+
+$TxtPatchWimOutName.Add_TextChanged({
+  $Script:PatchWimOutNameFromSource = $false
+  $resolved = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+  $LblPWWimPreview.Text = if ($resolved.Trim()) { $resolved } else { "" }
+  Update-UI
+})
+
+# ==============================================================================
+# TAB 7 - HELP
 # ==============================================================================
 $TabHelp = New-Tab "  Help"
 
@@ -1153,9 +2808,10 @@ $HelpText.Text = @"
 WIM WIZARD - Quick Start Guide
 ===============================
 
-WIM Wizard services a Windows 11 Enterprise WIM image for deployment via
-SCCM/MECM. It injects language packs, removes unwanted apps, and applies
-the latest Patch Tuesday updates - all in one automated process.
+WIM Wizard services a Windows 11 WIM image for deployment via SCCM/MECM.
+It injects language packs, removes unwanted apps, and applies the latest
+Patch Tuesday updates - all in one automated process. Enterprise is the
+default edition; use the Image edition selector to build Pro or others.
 
 You need ISOs from Microsoft Volume Licensing. See links below.
   x64 build (25H2 Enterprise):
@@ -1201,6 +2857,13 @@ Source folder:     Folder containing the ISO files.
                    (Windows ISO + matching LP ISO for your target arch).
                    Default: ISO-Source\ next to WimWizard.ps1
 
+Image edition:     Select which Windows edition to service from the ISO.
+                   Populated automatically after the ISO is probed.
+                   Defaults to Windows 11 Enterprise. Change to build a
+                   Pro, Education or other edition from the same ISO.
+                   Passes -WimIndex to WimWizard.ps1 when non-Enterprise
+                   is selected; Enterprise uses auto-detection (default).
+
 Output WIM:        Where to save the finished WIM. Auto-generated
                    from version, languages and date if left blank.
 
@@ -1230,6 +2893,53 @@ RSAT checkboxes are automatically hidden when ARM64 architecture is
 detected (only one Windows ISO in source folder, ARM64 type).
 
 
+TAB: SCCM
+---------
+Automate importing the finished WIM into SCCM/MECM as an OS Image package.
+Requires the ConfigurationManager PowerShell module (installed with the
+SCCM/MECM Administration Console). Hover over the module indicator at the
+top of the tab for details if it shows red.
+
+Server (FQDN):   FQDN of your SCCM primary site server.
+Site code:       Three-character site code (e.g. FC1).
+                 Use "Test connection" to verify before running.
+
+Package storage path:
+  UNC path where SCCM reads the WIM from. Must be accessible by the SCCM
+  computer account (not just your user account).
+  Example: \\sccm01\SCCMSources\OSD\OSImages
+
+Package name template:
+  The display name for the SCCM OS Image package. Click the variable
+  buttons to insert placeholders - they are resolved at import time:
+    {Version}   ->  e.g. 25H2
+    {Edition}   ->  e.g. Ent, Pro, Edu, ProWork etc.
+    {Languages} ->  e.g. se, no
+    {FoD}       ->  e.g. NetFx3, RsatAD
+    {Date}      ->  today's date in yyyy-MM-dd format
+  The preview line below shows the resolved name live.
+  {Date} is never saved to the registry - it always resolves to today.
+
+Import mode:
+  Create new:   A new OS Image package is created in SCCM each run.
+  Update existing: Provide the Package ID of an existing package to update
+    its source path, name, version and comment. Recommended for monthly
+    patching - keeps the same package (and task sequence references) while
+    refreshing the content.
+    Find the Package ID: Software Library -> Operating Systems ->
+    Operating System Images -> right-click -> Properties -> General.
+
+Auto-import:  Runs import automatically after a successful build.
+Update DPs:   Triggers a distribution point update after import.
+              DP replication is asynchronous - WIM Wizard only initiates it.
+
+WIM to import: Pre-filled with the last successfully built WIM. Browse to
+  select a different file (e.g. to import an older build manually).
+
+If a build succeeds but auto-import fails, a warning is shown on the
+completion screen. The WIM is always safe on disk regardless.
+
+
 FIRST-TIME SETUP
 ----------------
 1. Download the Windows 11 Enterprise ISO and Language Pack ISO from:
@@ -1242,8 +2952,8 @@ FIRST-TIME SETUP
 
 4. Select your languages, review app removal, click Run.
 
-5. Import the finished WIM into SCCM:
-   Software Library -> OS Images -> right-click -> Update Distribution Points
+5. The finished WIM appears in Output\. Import it into SCCM manually or
+   configure the SCCM tab to import automatically.
 
 
 MONTHLY PATCHING
@@ -1264,6 +2974,10 @@ ARM64 build:
   .\WimWizard.ps1 -ARM64 -Languages "da,fi,no,se" -Unattended
   (ARM64 FoD note: only -FoDList "NetFx3" is supported; RSAT is x64 only)
 
+Specific edition (e.g. Pro instead of Enterprise):
+  .\WimWizard.ps1 -Languages "da,fi,no,se" -WimIndex 5 -Unattended
+  (Use dism /Get-ImageInfo to find the index number for your target edition)
+
 With Features on Demand:
   .\WimWizard.ps1 -Languages "da,fi,no,se" -FoDList "NetFx3,RsatAD" -Unattended
 
@@ -1275,6 +2989,25 @@ Patch existing:
 
 Custom app list (generated by GUI):
   .\WimWizard.ps1 -Languages "se" -AppxListPath "WimWizard-AppxList.xml" -Unattended
+
+Build and create new SCCM package (scheduled task example):
+  .\WimWizard.ps1 -Languages "se,no" -FoDList "NetFx3,RsatAD" -Unattended `
+    -SCCMImport `
+    -SCCMServer "sccm01.fidelity.local" -SCCMSiteCode "FC1" `
+    -SCCMPackagePath "\\sccm01\SCCMSources\OSD\OSImages" `
+    -SCCMPackageName "Windows 11 25H2 - se, no - NetFx3, RsatAD - 2026-05-10" `
+    -SCCMVersion "25H2" -SCCMUpdateDPs
+
+Build and update existing SCCM package (recommended for monthly patching):
+  .\WimWizard.ps1 -Languages "se,no" -Unattended `
+    -SCCMImport `
+    -SCCMServer "sccm01.fidelity.local" -SCCMSiteCode "FC1" `
+    -SCCMPackagePath "\\sccm01\SCCMSources\OSD\OSImages" `
+    -SCCMPackageName "Windows 11 25H2 - se, no - 2026-05-10" `
+    -SCCMVersion "25H2" -SCCMPackageID "FC100042" -SCCMUpdateDPs
+
+Note: -SCCMImport requires the SCCM console installed on the machine
+running WimWizard. Run .\WimWizard.ps1 -Help for full parameter reference.
 
 
 FILES
@@ -1298,9 +3031,6 @@ VERSION
 "@
 $TabHelp.Controls.Add($HelpText)
 
-
-# ==============================================================================
-# BOTTOM BAR - command preview + Run button
 # ==============================================================================
 $PanelBottom  = New-Object System.Windows.Forms.Panel
 $PanelBottom.Dock  = "Bottom"
@@ -1319,17 +3049,18 @@ $PanelBottom.Controls.Add($LblCmdCaption)
 $LblCmd  = New-Object System.Windows.Forms.Label
 $LblCmd.Font  = $FontSmall
 $LblCmd.ForeColor  = [System.Drawing.Color]::FromArgb(140, 255, 140)
-$LblCmd.Location  = New-Object System.Drawing.Point(10, 30)
-$LblCmd.Size  = New-Object System.Drawing.Size(620, 36)
+$LblCmd.Location  = New-Object System.Drawing.Point(78, 8)
+$LblCmd.Size  = New-Object System.Drawing.Size(548, 54)
 $LblCmd.AutoEllipsis  = $false
 $LblCmd.AutoSize      = $false
+$LblCmd.UseMnemonic  = $false
 $PanelBottom.Controls.Add($LblCmd)
 
 
 $BtnRun  = New-Object System.Windows.Forms.PictureBox
 $BtnRun.Image     = $_btnImage
 $BtnRun.Size      = New-Object System.Drawing.Size(105, 28)
-$BtnRun.Location  = New-Object System.Drawing.Point(644, 21)
+$BtnRun.Location  = New-Object System.Drawing.Point(634, 21)
 $BtnRun.SizeMode  = "Normal"
 $BtnRun.Cursor    = [System.Windows.Forms.Cursors]::Hand
 $BtnRun.BackColor = [System.Drawing.Color]::Transparent
@@ -1346,7 +3077,7 @@ $LblSpinner.Font      = New-Object System.Drawing.Font('Segoe UI', 16, [System.D
 $LblSpinner.ForeColor = [System.Drawing.Color]::FromArgb(30, 120, 210)
 $LblSpinner.BackColor = [System.Drawing.Color]::Transparent
 $LblSpinner.Size      = New-Object System.Drawing.Size(34, 32)
-$LblSpinner.Location  = New-Object System.Drawing.Point(706, 14)
+$LblSpinner.Location  = New-Object System.Drawing.Point(696, 14)
 $LblSpinner.TextAlign = 'MiddleCenter'
 $LblSpinner.Visible   = $false
 $PanelBottom.Controls.Add($LblSpinner)
@@ -1373,14 +3104,36 @@ $BtnRun.Controls.Add($LblRunText)
 
 # -- Read languages from existing WIM and pre-check matching boxes ------------
 function Read-WimLanguages {
-    # Reads language metadata from a WIM for informational purposes only.
-    # Does NOT touch the language checkboxes — those belong to the user's
-    # language-pack selection for ISO builds and are irrelevant in patch mode.
     param([string]$WimPath)
     try {
         $info = Get-WindowsImage -ImagePath $WimPath -Index 1 -ErrorAction Stop
-        $Script:PatchWimLocales = $info.Languages   # stored for display/logging
-        Write-Host "  WIM contains: $($info.Languages -join ', ')" -ForegroundColor DarkGray
+
+        # Uncheck all first
+        foreach ($cb in $LangCheckboxes.Values) { $cb.Checked = $false }
+        # Map installed locales back to country codes and check matching boxes
+        foreach ($locale in $info.Languages) {
+            $countryCode = $locale.Split('-')[-1].ToLower()
+            if ($LangCheckboxes.ContainsKey($countryCode)) {
+                $LangCheckboxes[$countryCode].Checked = $true
+            }
+        }
+        Write-Host "Read languages from WIM: $($info.Languages -join ', ')" -ForegroundColor DarkGray
+
+        # Derive EditionTag from the WIM version so {Version} resolves correctly
+        # in the SCCM package name template when running in patch mode.
+        # Maps OS build number to edition string, same logic as the ISO probe.
+        if ($info.Version) {
+            $buildNum = [int](($info.Version -split '\.')[2])
+            $Script:EditionTag = switch ($true) {
+                ($buildNum -ge 26100) { '25H2' }
+                ($buildNum -ge 22631) { '23H2' }
+                ($buildNum -ge 22621) { '22H2' }
+                ($buildNum -ge 22000) { '21H2' }
+                default               { $info.Version }
+            }
+            Write-Host "Derived EditionTag from WIM: $($Script:EditionTag) (build $buildNum)" -ForegroundColor DarkGray
+            Update-SCCMPreview
+        }
     } catch {
         [System.Windows.Forms.MessageBox]::Show(
             "Could not read WIM metadata:`n$($_.Exception.Message)",
@@ -1413,20 +3166,42 @@ $LblCompleteMsg.Size      = New-Object System.Drawing.Size(760, 50)
 $LblCompleteMsg.Location  = New-Object System.Drawing.Point(0, 210)
 $PanelComplete.Controls.Add($LblCompleteMsg)
 
+# SCCM package name label - shown only when SCCM auto-import ran successfully
+$LblCompletePkg = New-Object System.Windows.Forms.Label
+$LblCompletePkg.Text      = ''
+$LblCompletePkg.Font      = $FontSmall
+$LblCompletePkg.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+$LblCompletePkg.TextAlign = 'MiddleCenter'
+$LblCompletePkg.Size      = New-Object System.Drawing.Size(760, 20)
+$LblCompletePkg.Location  = New-Object System.Drawing.Point(0, 270)
+$LblCompletePkg.Visible   = $false
+$PanelComplete.Controls.Add($LblCompletePkg)
+
 $LblCompleteFile = New-Object System.Windows.Forms.Label
 $LblCompleteFile.Text      = ''
 $LblCompleteFile.Font      = $FontSmall
 $LblCompleteFile.ForeColor = $ColSubtext
 $LblCompleteFile.TextAlign = 'MiddleCenter'
 $LblCompleteFile.Size      = New-Object System.Drawing.Size(760, 30)
-$LblCompleteFile.Location  = New-Object System.Drawing.Point(0, 270)
+$LblCompleteFile.Location  = New-Object System.Drawing.Point(0, 295)
 $PanelComplete.Controls.Add($LblCompleteFile)
+
+# SCCM warning label - shown only when build succeeded but auto-import failed
+$LblCompleteSCCM = New-Object System.Windows.Forms.Label
+$LblCompleteSCCM.Text      = ''
+$LblCompleteSCCM.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+$LblCompleteSCCM.ForeColor = $ColWarn
+$LblCompleteSCCM.TextAlign = 'MiddleCenter'
+$LblCompleteSCCM.Size      = New-Object System.Drawing.Size(760, 22)
+$LblCompleteSCCM.Location  = New-Object System.Drawing.Point(0, 328)
+$LblCompleteSCCM.Visible   = $false
+$PanelComplete.Controls.Add($LblCompleteSCCM)
 
 $BtnCompleteOK = New-Object System.Windows.Forms.Button
 $BtnCompleteOK.Text      = 'OK'
 $BtnCompleteOK.Font      = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 $BtnCompleteOK.Size      = New-Object System.Drawing.Size(120, 40)
-$BtnCompleteOK.Location  = New-Object System.Drawing.Point(320, 330)
+$BtnCompleteOK.Location  = New-Object System.Drawing.Point(320, 378)
 $BtnCompleteOK.BackColor = [System.Drawing.Color]::FromArgb(0, 160, 70)
 $BtnCompleteOK.ForeColor = $ColFg
 $BtnCompleteOK.FlatStyle = 'Flat'
@@ -1444,60 +3219,101 @@ function Get-SettingsSnapshot {
   $langs = ($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $apps  = ($AppCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $fods  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
-  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)"
+  $sccm  = "$($TxtSCCMServer.Text)|$($TxtSCCMSiteCode.Text)|$($TxtSCCMPath.Text)|$($TxtSCCMNameTemplate.Text)|$($TxtSCCMComment.Text)|$([int]$RadSCCMUpdate.Checked)|$($TxtSCCMPackageID.Text)|$([int]$ChkSCCMAutoImport.Checked)|$([int]$ChkSCCMUpdateDPs.Checked)"
+  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$sccm"
 }
 
 # -- Build command string -------------------------------------------------------
 function Build-CommandString {
-  # Languages
-  $selCodes = @($LangCheckboxes.GetEnumerator() |
-  Where-Object { $_.Value.Checked } |
-  ForEach-Object { $_.Key } |
-  Sort-Object)
-
   $cmd = ".\WimWizard.ps1"
 
-  # Patch mode: languages, source folder, and FoD are read from the WIM — do not pass them
-  $patchWimValid = $ChkPatchMode.Checked -and
-                   $TxtPatchWim.Text -ne "Select existing WIM file..." -and
-                   $TxtPatchWim.Text -ne ""
+  # ---- PATCH MODE ----
+  if ($ChkPatchMode -and $ChkPatchMode.Checked) {
+    $sccmSrc  = $RadPWSrcSCCM.Checked -and $TxtPatchWimPkgID.Text.Trim().Length -eq 8
+    $localSrc = $RadPWSrcLocal.Checked -and
+                $TxtPatchWim.Text -ne "Select existing WIM file..." -and
+                $TxtPatchWim.Text -ne ""
 
-  if ($selCodes.Count -gt 0 -and -not $patchWimValid) {
+    if ($sccmSrc) {
+      $pkgName = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+      $wimArg  = if ($Script:PatchWimSCCMFileName) { $Script:PatchWimSCCMFileName } else { "<WIM from pkg $($TxtPatchWimPkgID.Text.Trim())>" }
+      $cmd += " -PatchExistingWim `"$wimArg`""
+      $cmd += " -OutputPath `".\Output\`" -Unattended"
+      return @{ Cmd = $cmd; SelectedCodes = @(); Preview = "" }
+    } elseif ($localSrc) {
+      $cmd += " -PatchExistingWim `"$($TxtPatchWim.Text)`""
+      $outPath = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+      if ($outPath.Trim()) { $cmd += " -OutputPath `"$outPath`"" }
+    } else {
+      # Nothing selected yet - show placeholder
+      $cmd += " -PatchExistingWim `"<select a source above>`""
+    }
+
+    if ($ChkSkipUpdates -and $ChkSkipUpdates.Checked) { $cmd += " -SkipUpdates" }
+    $cmd += " -Unattended"
+    return @{ Cmd = $cmd; SelectedCodes = @(); Preview = "" }
+  }
+
+  # ---- NORMAL BUILD MODE ----
+  $selCodes = @($LangCheckboxes.GetEnumerator() |
+    Where-Object { $_.Value.Checked } |
+    ForEach-Object { $_.Key } |
+    Sort-Object)
+
+  if ($selCodes.Count -gt 0) {
     $cmd += " -Languages `"$($selCodes -join ',')`""
   }
 
   $src = $TxtSource.Text.Trim()
-  if ($src -and $src -ne "$ScriptRoot\ISO-Source" -and -not $patchWimValid) {
+  if ($src -and $src -ne "$ScriptRoot\ISO-Source") {
     $cmd += " -SourceFolder `"$src`""
   }
 
-  # Compute output filename / preview (single source of truth)
   $out = $TxtOutput.Text.Trim()
   if (-not $out -or $TxtOutput.Tag -ne "manual") {
-    $out = if ($patchWimValid) {
-      # Derive output name from source WIM: same basename, today's date
-      [System.IO.Path]::GetFileName($TxtPatchWim.Text) -replace '_\d{8}\.wim$', "_$(Get-Date -Format 'yyyyMMdd').wim"
-    } else {
-      Get-FilenamePreview -SelectedCodes $(if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $selCodes }) -BuildStr $Script:BuildString
-    }
+    $out = Get-FilenamePreview -SelectedCodes $(if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $selCodes }) -BuildStr $Script:BuildString
   }
   $cmd += " -OutputPath `"$out`""
 
-  if ($patchWimValid)                                          { $cmd += " -PatchExistingWim `"$($TxtPatchWim.Text)`"" }
-  if ($ChkSkipUpdates.Checked)                                 { $cmd += " -SkipUpdates" }
-  if ($ChkSkipLPs.Checked -and -not $patchWimValid)           { $cmd += " -SkipLanguagePacks" }
-  if ($ChkSkipAppx.Checked)                                    { $cmd += " -SkipAppxRemoval" }
-  # FoD selections — not applicable in patch mode
-  if ($FoDCheckboxes -and -not $patchWimValid) {
+  if ($ChkSkipUpdates.Checked)  { $cmd += " -SkipUpdates" }
+  if ($ChkSkipLPs.Checked)      { $cmd += " -SkipLanguagePacks" }
+  if ($ChkSkipAppx.Checked)     { $cmd += " -SkipAppxRemoval" }
+  if ($FoDCheckboxes) {
     $previewFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
     if ($previewFoDs.Count -gt 0) { $cmd += " -FoDList `"$($previewFoDs -join ',')`"" }
   }
-  # Architecture - only needed when both ISOs present; otherwise implicit
+  if ($CmbEdition.Enabled -and $CmbEdition.SelectedItem) {
+    $selName = [string]$CmbEdition.SelectedItem
+    $isEnt   = $selName -match 'Enterprise' -and $selName -notmatch 'Evaluation'
+    if (-not $isEnt) { $cmd += " -WimIndex $($Script:EditionIndexMap[$CmbEdition.SelectedIndex])" }
+  }
   if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) {
     $cmd += " -ARM64"
   }
   $cmd += " -Unattended"
   return @{ Cmd = $cmd; SelectedCodes = $selCodes; Preview = $out }
+}
+
+function Update-AppxSkipState {
+  # Called whenever ChkSkipAppx changes to grey/restore application checkboxes.
+  if ($ChkSkipAppx.Checked) {
+    $Script:SavedAppxState = @{}
+    foreach ($kvp in $AppCheckboxes.GetEnumerator()) {
+      $Script:SavedAppxState[$kvp.Key] = $kvp.Value.Checked
+      $kvp.Value.Checked   = $false
+      $kvp.Value.Enabled   = $false
+      $kvp.Value.ForeColor = $ColSubtext
+    }
+  } else {
+    foreach ($kvp in $AppCheckboxes.GetEnumerator()) {
+      $kvp.Value.Enabled   = $true
+      $kvp.Value.ForeColor = $ColFg
+      if ($Script:SavedAppxState -and $Script:SavedAppxState.ContainsKey($kvp.Key)) {
+        $kvp.Value.Checked = $Script:SavedAppxState[$kvp.Key]
+      }
+    }
+    $Script:SavedAppxState = @{}
+  }
 }
 
 function Update-LangSkipState {
@@ -1537,6 +3353,9 @@ function Update-UI {
   $TxtOutput.Text = $preview
   }
 
+  # Refresh SCCM package name preview
+  Update-SCCMPreview
+
   # Update ISO status indicators
   Update-ISOStatus
   Update-RunButton
@@ -1546,8 +3365,12 @@ function Update-UI {
 foreach ($cb in $LangCheckboxes.Values) {
   $cb.Add_CheckedChanged({ Update-UI })
 }
+foreach ($cb in $FoDCheckboxes.Values) {
+  $cb.Add_CheckedChanged({ Update-UI })
+}
 $ChkSkipUpdates.Add_CheckedChanged({ Update-UI })
 $ChkSkipLPs.Add_CheckedChanged({ Update-LangSkipState; Update-UI })
+$ChkSkipAppx.Add_CheckedChanged({ Update-AppxSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-UI })
 $TxtPatchWim.Add_TextChanged({ Update-UI })
 $TxtSource.Add_TextChanged({ Start-ISOProbe })
@@ -1564,66 +3387,378 @@ $LblRunText.Add_MouseEnter({ $BtnRun.BackColor = [System.Drawing.Color]::FromArg
 $LblRunText.Add_MouseLeave({ $BtnRun.BackColor = [System.Drawing.Color]::Transparent })
 
 $Script:RunClick = {
-  $data = Build-CommandString
-
-  # Validate patch mode - must have a valid WIM file selected
-  if ($ChkPatchMode.Checked) {
-    $patchPath = $TxtPatchWim.Text.Trim()
-    if ($patchPath -eq "Select existing WIM file..." -or $patchPath -eq "" -or -not (Test-Path $patchPath)) {
-      [System.Windows.Forms.MessageBox]::Show(
-        "Please select a valid existing WIM file to patch.",
-        "No WIM selected", "OK", "Warning") | Out-Null
-      $Tabs.SelectedTab = $TabOpts
-      return
-    }
+  # Stop any stale timer from a previous run
+  if ($Script:BuildTimer) {
+    $Script:BuildTimer.Stop()
+    $Script:BuildTimer.Dispose()
+    $Script:BuildTimer = $null
   }
 
-  # Warn if LP ISO is missing (Windows ISO already confirmed green before Run is visible)
-  if (-not $ChkPatchMode.Checked -and $Script:IndLP.ForeColor.R -eq 220) {
+  $data = Build-CommandString
+  $Script:IsPatchSCCM      = $false
+  $Script:PatchSCCMContext  = $null
+  $Script:SCCMFailReason    = ""
+
+  # Switch button to "Running" state immediately
+  $LblRunText.Text       = "Running..."
+  $BtnRun.Enabled        = $false
+  $LblRunText.Enabled    = $false
+  $Form.Refresh()
+
+  # Helper: restore Run button regardless of how we exit
+  $resetRunButton = { $LblRunText.Text = ">  Run"; $BtnRun.Enabled = $true; $LblRunText.Enabled = $true }
+
+  # ---- PATCH MODE ----
+  if ($ChkPatchMode.Checked) {
+    $sccmSrc  = $RadPWSrcSCCM.Checked -and $TxtPatchWimPkgID.Text.Trim().Length -eq 8
+    $localSrc = $RadPWSrcLocal.Checked -and
+                $TxtPatchWim.Text -ne "Select existing WIM file..." -and
+                $TxtPatchWim.Text -ne ""
+
+    # Validate source
+    if (-not $sccmSrc -and -not $localSrc) {
+      [System.Windows.Forms.MessageBox]::Show(
+        "Please select a WIM source before running.`n`nEither enter a valid SCCM Package ID (8 characters) or select a local WIM file.",
+        "No source selected", "OK", "Warning") | Out-Null
+      $Tabs.SelectedTab = $TabPatchWim
+      & $resetRunButton; return
+    }
+    if ($localSrc -and -not (Test-Path $TxtPatchWim.Text)) {
+      [System.Windows.Forms.MessageBox]::Show(
+        "The selected WIM file could not be found:`n$($TxtPatchWim.Text)",
+        "File not found", "OK", "Warning") | Out-Null
+      $Tabs.SelectedTab = $TabPatchWim
+      & $resetRunButton; return
+    }
+
+    $argList = @()
+
+    if ($sccmSrc) {
+      # ---- Resolve package source path from SCCM ----
+      $pkgID   = $TxtPatchWimPkgID.Text.Trim()
+      $pkgName = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+
+      try {
+        if (-not (Get-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -ErrorAction SilentlyContinue)) {
+          Import-Module $Script:SCCMModulePath -ErrorAction Stop
+          New-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -PSProvider CMSite `
+            -Root $TxtSCCMServer.Text.Trim() -ErrorAction Stop | Out-Null
+        }
+        Push-Location "$($TxtSCCMSiteCode.Text.Trim())`:\" -ErrorAction Stop
+        $pkg = Get-CMOperatingSystemImage -Id $pkgID -ErrorAction Stop
+        Pop-Location
+      } catch {
+        Pop-Location -ErrorAction SilentlyContinue
+        [System.Windows.Forms.MessageBox]::Show(
+          "Could not connect to SCCM or retrieve package $pkgID`:`n$($_.Exception.Message)",
+          "SCCM Error", "OK", "Warning") | Out-Null
+        $Tabs.SelectedTab = $TabPatchWim
+        & $resetRunButton; return
+      }
+
+      $uncPath = $pkg.PkgSourcePath
+      if (-not $uncPath) {
+        [System.Windows.Forms.MessageBox]::Show(
+          "Package $pkgID has no source path set in SCCM.",
+          "No source path", "OK", "Warning") | Out-Null
+        $Tabs.SelectedTab = $TabPatchWim
+        & $resetRunButton; return
+      }
+
+      # PkgSourcePath may point to the WIM file directly or to a folder
+      $uncIsFile = $uncPath -match '\.(wim|esd)$'
+      if ($uncIsFile) {
+        $wimFile = Get-Item -Path $uncPath -ErrorAction SilentlyContinue
+      } else {
+        $wimFile = Get-ChildItem -Path $uncPath -Filter "*.wim" -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+      }
+      if (-not $wimFile) {
+        [System.Windows.Forms.MessageBox]::Show(
+          "No WIM file found in package source path:`n$uncPath",
+          "WIM not found", "OK", "Warning") | Out-Null
+        $Tabs.SelectedTab = $TabPatchWim
+        & $resetRunButton; return
+      }
+
+      # ---- Copy WIM to working folder (already Defender-excluded in most configs) ----
+      $tempDir = Join-Path $ScriptRoot "Output\WIMServicing_Work"
+      if (-not (Test-Path $tempDir)) { New-Item -ItemType Directory -Path $tempDir -Force | Out-Null }
+      $localWim = Join-Path $tempDir $wimFile.Name
+      try {
+        [System.IO.File]::Copy($wimFile.FullName, $localWim, $true)
+      } catch {
+        [System.Windows.Forms.MessageBox]::Show(
+          "Failed to copy WIM from package source:`n$($_.Exception.Message)",
+          "Copy failed", "OK", "Warning") | Out-Null
+        $Tabs.SelectedTab = $TabPatchWim
+        & $resetRunButton; return
+      }
+
+      # ---- Store SCCM context for the post-build step ----
+      $Script:PatchSCCMContext = @{
+        PkgID         = $pkgID
+        PkgSourcePath = $uncPath
+        WimFileName   = $wimFile.Name
+        LocalTempWim  = $localWim
+        TempDir       = $tempDir
+        NewPkgName    = $pkgName.Trim()
+        CreateNew     = $RadPatchWimNew.Checked
+        SiteCode      = $TxtSCCMSiteCode.Text.Trim()
+        Server        = $TxtSCCMServer.Text.Trim()
+        PackagePath   = $TxtSCCMPath.Text.Trim()
+        UpdateDPs     = $ChkSCCMUpdateDPs.Checked
+      }
+
+      # Pass OutputPath as the Output\ folder - WimWizard auto-names the WIM there.
+      # This means the log also lands in Output\ where the user expects it.
+      $outputFolder = Join-Path $ScriptRoot "Output"
+      if (-not (Test-Path $outputFolder)) { New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null }
+
+      $argList += "-PatchExistingWim `"$localWim`""
+      $argList += "-OutputPath `"$outputFolder`""
+      $Script:OutFile          = ""   # filled by copy-back after build
+      $Script:BuiltWimPath     = ""   # filled by copy-back after build
+      $Script:PatchOutputFolder = $outputFolder
+      $Script:IsPatchSCCM      = $true
+    } else {
+      # Local WIM source - copy to work folder first (same as SCCM flow)
+      # This ensures the elevated process can always access the file,
+      # even if the source is on a network path not available under elevation.
+      $srcWim = $TxtPatchWim.Text
+      $outPath = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+      if (-not $outPath.Trim()) {
+        $outPath = Join-Path $ScriptRoot "Output\$([System.IO.Path]::GetFileName($srcWim))"
+      }
+      $outDir = Split-Path $outPath -Parent
+      if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+
+      # Copy source WIM to work folder
+      $workDir = Join-Path $ScriptRoot "Output\WIMServicing_Work"
+      if (-not (Test-Path $workDir)) { New-Item -ItemType Directory -Path $workDir -Force | Out-Null }
+      $localWim = Join-Path $workDir ([System.IO.Path]::GetFileName($srcWim))
+      try {
+        [System.IO.File]::Copy($srcWim, $localWim, $true)
+      } catch {
+        [System.Windows.Forms.MessageBox]::Show(
+          "Failed to copy WIM to work folder:`n$($_.Exception.Message)",
+          "Copy failed", "OK", "Warning") | Out-Null
+        $Tabs.SelectedTab = $TabPatchWim
+        & $resetRunButton; return
+      }
+
+      $argList += "-PatchExistingWim `"$localWim`""
+      $argList += "-OutputPath `"$outPath`""
+      $Script:OutFile      = [System.IO.Path]::GetFileName($outPath)
+      $Script:BuiltWimPath = $outPath
+    }
+
+    if ($ChkSkipUpdates.Checked) { $argList += "-SkipUpdates" }
+    $argList += "-Unattended"
+
+    $Script:IsPatch = $true
+    $Script:CompletionPkgName = ""   # filled above only for SCCM-sourced patch
+    $argStr = $argList -join " "
+    $launcherDir  = "$env:ProgramData\WimWizard"
+    if (-not (Test-Path $launcherDir)) { New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null }
+    $launcherPath = Join-Path $launcherDir "WimWizard_Launch.ps1"
+    $launcherLines = @(
+      "Set-Location '$($ScriptRoot -replace "'","''")'",
+      "& '$($MainScript -replace "'","''")'  $argStr",
+      "exit `$LASTEXITCODE"
+    )
+    Set-Content -Path $launcherPath -Value $launcherLines -Encoding UTF8
+
+    Save-Settings
+    $Script:SettingsSnapshot = Get-SettingsSnapshot
+    $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
+    $Script:BuildProc = Start-Process powershell.exe -ArgumentList $psArgs -Verb RunAs -PassThru
+    $Script:LauncherPath = $launcherPath
+    $Form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
+
+    $Script:BuildTimer = New-Object System.Windows.Forms.Timer
+    $Script:BuildTimer.Interval = 2000
+    $Script:BuildTimer.Add_Tick({
+      if ($Script:BuildProc -and $Script:BuildProc.HasExited) {
+        $t = $Script:BuildTimer; $Script:BuildTimer = $null
+        $t.Stop(); $t.Dispose()
+        Remove-Item -Path $Script:LauncherPath -Force -ErrorAction SilentlyContinue
+        $Form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+        $Form.BringToFront()
+        $exitCode  = $Script:BuildProc.ExitCode
+        $succeeded = ($exitCode -eq 0)
+
+        try {
+        $sccmFailed = $false
+        if ($succeeded) {
+          # ---- SCCM patch copy-back ----
+          if ($Script:IsPatchSCCM -and $Script:PatchSCCMContext) {
+            $ctx = $Script:PatchSCCMContext
+            $Script:CompletionPkgName = if ($ctx.NewPkgName) { $ctx.NewPkgName } else { "" }
+            try {
+              # Find patched WIM in Output\ (newest .wim written by WimWizard.ps1)
+              $patchedWim = Get-ChildItem -Path $Script:PatchOutputFolder -Filter "*.wim" -ErrorAction SilentlyContinue |
+                            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              if (-not $patchedWim) { throw "Patched WIM not found in Output folder." }
+              $Script:OutFile = $patchedWim.Name
+
+              # ---- ALL FILE OPS BEFORE entering CM PSDrive (avoids provider conflict) ----
+              $uncIsFile = $ctx.PkgSourcePath -match '\.(wim|esd)$'
+              $srcFolder = if ($uncIsFile) { Split-Path $ctx.PkgSourcePath -Parent } else { $ctx.PkgSourcePath }
+              $destWim   = if ($uncIsFile) { $ctx.PkgSourcePath } else { Join-Path $ctx.PkgSourcePath $ctx.WimFileName }
+
+              # Copy patched WIM back to UNC source path
+              [System.IO.File]::Copy($patchedWim.FullName, $destWim, $true)
+
+              # For CreateNew: determine new WIM destination and copy there too
+              $newPkgWimPath = $null
+              if ($ctx.CreateNew) {
+                $newWimName = $patchedWim.Name
+                $newWimDest = if ($ctx.PackagePath) {
+                  $newDir = Join-Path $ctx.PackagePath ($ctx.NewPkgName -replace '[\/:*?"<>|]', '_')
+                  if (-not (Test-Path $newDir)) { New-Item -ItemType Directory -Path $newDir -Force | Out-Null }
+                  Join-Path $newDir $newWimName
+                } else {
+                  Join-Path $srcFolder $newWimName
+                }
+                [System.IO.File]::Copy($patchedWim.FullName, $newWimDest, $true)
+                $newPkgWimPath = $newWimDest
+              }
+
+              # Clean up local files before CM operations
+              Remove-Item -Path $patchedWim.FullName -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path $ctx.LocalTempWim    -Force -ErrorAction SilentlyContinue
+
+              # ---- CM PSDrive operations ----
+              if (-not (Get-PSDrive -Name $ctx.SiteCode -ErrorAction SilentlyContinue)) {
+                Import-Module $Script:SCCMModulePath -ErrorAction Stop
+                New-PSDrive -Name $ctx.SiteCode -PSProvider CMSite -Root $ctx.Server -ErrorAction Stop | Out-Null
+              }
+              Push-Location "$($ctx.SiteCode):\" -ErrorAction Stop
+              if ($ctx.CreateNew) {
+                $newPkg = New-CMOperatingSystemImage -Name $ctx.NewPkgName -Path $newPkgWimPath -ErrorAction Stop
+                if ($ctx.UpdateDPs) { $newPkg | Update-CMDistributionPoint -ErrorAction SilentlyContinue }
+              } else {
+                if ($ctx.NewPkgName) {
+                  Set-CMOperatingSystemImage -Id $ctx.PkgID -Path $destWim -NewName $ctx.NewPkgName -ErrorAction Stop
+                } else {
+                  Set-CMOperatingSystemImage -Id $ctx.PkgID -Path $destWim -ErrorAction Stop
+                }
+                if ($ctx.UpdateDPs) { Get-CMOperatingSystemImage -Id $ctx.PkgID | Update-CMDistributionPoint -ErrorAction SilentlyContinue }
+              }
+              Pop-Location
+            } catch {
+              Pop-Location -ErrorAction SilentlyContinue
+              $sccmFailed = $true
+              $Script:SCCMFailReason = $_.Exception.Message
+            } finally {
+              Remove-Item -Path $ctx.LocalTempWim -Force -ErrorAction SilentlyContinue
+            }
+            $Script:IsPatchSCCM      = $false
+            $Script:PatchSCCMContext  = $null
+          }
+        }
+
+        if ($succeeded) {
+          $LblCompleteIcon.Text      = [char]0x2714
+          $LblCompleteIcon.ForeColor = [System.Drawing.Color]::FromArgb(0, 160, 70)
+          $LblCompleteMsg.Text       = "Image patch complete!"
+          $LblCompleteMsg.ForeColor  = $ColFg
+          if ($Script:CompletionPkgName) {
+            $LblCompletePkg.Text    = $Script:CompletionPkgName
+            $LblCompletePkg.Visible = $true
+          } else {
+            $LblCompletePkg.Visible = $false
+          }
+          $LblCompleteFile.Text      = $Script:OutFile
+          $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(0, 160, 70)
+          if ($sccmFailed) {
+            $LblCompleteSCCM.Text    = [char]0x26A0 + "  SCCM update failed: $Script:SCCMFailReason"
+            $LblCompleteSCCM.Visible = $true
+          } else {
+            $LblCompleteSCCM.Visible = $false
+          }
+        } else {
+          $LblCompleteIcon.Text      = [char]0x2718
+          $LblCompleteIcon.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+          $LblCompleteMsg.Text       = "Patch failed! (exit code $exitCode)"
+          $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
+          $LblCompletePkg.Visible    = $false
+          $LblCompleteFile.Text      = "Check the log file in the Output folder for details."
+          $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
+          $LblCompleteSCCM.Visible   = $false
+          # Clean up temp on failure too
+          if ($Script:PatchSCCMContext) {
+            Remove-Item -Path $Script:PatchSCCMContext.LocalTempWim -Force -ErrorAction SilentlyContinue
+            $Script:PatchSCCMContext = $null
+          }
+        }
+        $LblRunText.Text    = ">  Run"
+        $BtnRun.Enabled     = $true
+        $LblRunText.Enabled = $true
+        $PanelBottom.Visible  = $false
+        $PanelComplete.BringToFront()
+        $PanelComplete.Visible = $true
+        } catch {
+          # Unexpected error in timer tick - show failure screen
+          $LblCompleteIcon.Text      = [char]0x2718
+          $LblCompleteIcon.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+          $LblCompleteMsg.Text       = "Patch post-processing failed."
+          $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
+          $LblCompleteFile.Text      = $_.Exception.Message
+          $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
+          $LblCompletePkg.Visible    = $false
+          $LblCompleteSCCM.Visible   = $false
+          $LblRunText.Text    = ">  Run"
+          $BtnRun.Enabled     = $true
+          $LblRunText.Enabled = $true
+          $PanelBottom.Visible  = $false
+          $PanelComplete.BringToFront()
+          $PanelComplete.Visible = $true
+        }
+      }
+    })
+    $Script:BuildTimer.Start()
+    return
+  }
+
+  # ---- NORMAL BUILD MODE ----
+
+  # Warn if LP ISO is missing
+  if ($Script:IndLP.ForeColor.R -eq 220) {
     $r = [System.Windows.Forms.MessageBox]::Show(
       "Language Pack ISO not found in:`n$($TxtSource.Text.Trim())`n`nSee the Help tab for download links.`n`nContinue anyway?",
       "Missing Language Pack ISO", "YesNo", "Warning")
     if ($r -ne "Yes") { $Tabs.SelectedTab = $TabOpts; return }
   }
 
-  if ($data.SelectedCodes.Count -eq 0 -and -not $ChkSkipLPs.Checked -and -not $ChkPatchMode.Checked) {
-  $r = [System.Windows.Forms.MessageBox]::Show(
-  "No languages selected.`n`nThe WIM will be English-only. Continue?",
-  "No languages selected", "YesNo", "Warning")
-  if ($r -ne "Yes") { return }
+  if ($data.SelectedCodes.Count -eq 0 -and -not $ChkSkipLPs.Checked) {
+    $r = [System.Windows.Forms.MessageBox]::Show(
+      "No languages selected.`n`nThe WIM will be English-only. Continue?",
+      "No languages selected", "YesNo", "Warning")
+    if ($r -ne "Yes") { return }
   }
 
-  # Build the full argument list for the main script
   $argList = @()
-  $patchWimValid = $ChkPatchMode.Checked -and
-                   $TxtPatchWim.Text -ne "Select existing WIM file..." -and
-                   $TxtPatchWim.Text -ne "" -and
-                   (Test-Path $TxtPatchWim.Text)
 
-  if ($data.SelectedCodes.Count -gt 0 -and -not $ChkSkipLPs.Checked -and -not $patchWimValid) {
-  $langStr = $data.SelectedCodes -join ','
-  $argList += "-Languages '$langStr'"
+  if ($data.SelectedCodes.Count -gt 0 -and -not $ChkSkipLPs.Checked) {
+    $langStr = $data.SelectedCodes -join ','
+    $argList += "-Languages '$langStr'"
   }
 
   $src = $TxtSource.Text.Trim()
-  if ($src -and -not $patchWimValid) { $argList += "-SourceFolder `"$src`"" }
+  if ($src) { $argList += "-SourceFolder `"$src`"" }
 
   $out = $TxtOutput.Text.Trim()
   if (-not $out -or $TxtOutput.Tag -ne "manual") {
-    if ($patchWimValid) {
-      $out = [System.IO.Path]::GetFileName($TxtPatchWim.Text) -replace '_\d{8}\.wim$', "_$(Get-Date -Format 'yyyyMMdd').wim"
-      $out = Join-Path "$ScriptRoot\Output" $out
-    } else {
-      $previewCodes = if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $data.SelectedCodes }
-      $out = Get-FilenamePreview -SelectedCodes $previewCodes -BuildStr $Script:BuildString
-      $out = Join-Path "$ScriptRoot\Output" $out
-    }
+    $previewCodes = if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $data.SelectedCodes }
+    $out = Get-FilenamePreview -SelectedCodes $previewCodes -BuildStr $Script:BuildString
+    $out = Join-Path "$ScriptRoot\Output" $out
   }
   $argList += "-OutputPath `"$out`""
 
   # Export Appx removal list to XML so WimWizard.ps1 can consume it via -AppxListPath
   $checkedPkgs = @($AppCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key })
-
   $AppxXmlPath = Join-Path $ScriptRoot "WimWizard-AppxList.xml"
   $xml  = [System.Xml.XmlDocument]::new()
   $dec  = $xml.CreateXmlDeclaration("1.0", "UTF-8", $null)
@@ -1641,85 +3776,137 @@ $Script:RunClick = {
   }
   $xml.Save($AppxXmlPath)
   if ($checkedPkgs.Count -eq 0) {
-    # No apps selected - pass -SkipAppxRemoval directly.
-    # Passing an empty XML via -AppxListPath causes a null-pipeline bug in the
-    # parser that makes it fall through to the full default removal list.
     $argList += "-SkipAppxRemoval"
   } else {
     $argList += "-AppxListPath `"$AppxXmlPath`""
   }
 
-  if ($ChkPatchMode.Checked -and $TxtPatchWim.Text -ne "Select existing WIM file..." -and (Test-Path $TxtPatchWim.Text)) {
-    $argList += "-PatchExistingWim `"$($TxtPatchWim.Text)`""
-  }
-  if ($ChkSkipUpdates.Checked)                       { $argList += "-SkipUpdates" }
-  if ($ChkSkipLPs.Checked -and -not $patchWimValid)  { $argList += "-SkipLanguagePacks" }
-  if ($ChkSkipAppx.Checked)                          { $argList += "-SkipAppxRemoval" }
-
-  # Pass selected FoD keys as comma-separated string — not applicable in patch mode
-  if (-not $patchWimValid) {
-    $selectedFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
-    if ($selectedFoDs.Count -gt 0) { $argList += "-FoDList `"$($selectedFoDs -join ',')`"" }
+  # WIM index - only pass if user has deviated from the default Enterprise selection
+  if ($CmbEdition.Enabled -and $CmbEdition.SelectedItem) {
+    $selectedName = [string]$CmbEdition.SelectedItem
+    $isDefaultEnt = $selectedName -match 'Enterprise' -and $selectedName -notmatch 'Evaluation'
+    if (-not $isDefaultEnt) {
+      $argList += "-WimIndex $($Script:EditionIndexMap[$CmbEdition.SelectedIndex])"
+    }
   }
 
-  # Always unattended when launched from GUI - all choices already made in the interface
+  if ($ChkSkipUpdates.Checked)  { $argList += "-SkipUpdates" }
+  if ($ChkSkipLPs.Checked)      { $argList += "-SkipLanguagePacks" }
+  if ($ChkSkipAppx.Checked)     { $argList += "-SkipAppxRemoval" }
+
+  $selectedFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
+  if ($selectedFoDs.Count -gt 0) { $argList += "-FoDList `"$($selectedFoDs -join ',')`"" }
+
+  # SCCM import args - only when auto-import enabled and CM module present
+  if ($ChkSCCMAutoImport -and $ChkSCCMAutoImport.Checked -and $Script:SCCMModuleAvailable) {
+    $sccmServer  = $TxtSCCMServer.Text.Trim()
+    $sccmCode    = $TxtSCCMSiteCode.Text.Trim()
+    $sccmPath    = $TxtSCCMPath.Text.Trim()
+    $sccmName    = Resolve-SCCMNameTemplate
+    $sccmVer     = if ($Script:EditionTag) { $Script:EditionTag } else { "" }
+    $sccmComment = $TxtSCCMComment.Text.Trim()
+    $sccmPkgID   = $TxtSCCMPackageID.Text.Trim()
+    if ($sccmServer -and $sccmCode -and $sccmPath -and $sccmName) {
+      $argList += "-SCCMImport"
+      $argList += "-SCCMServer `"$sccmServer`""
+      $argList += "-SCCMSiteCode `"$sccmCode`""
+      $argList += "-SCCMPackagePath `"$sccmPath`""
+      $argList += "-SCCMPackageName `"$($sccmName -replace '"', '`"')`""
+      if ($sccmVer)     { $argList += "-SCCMVersion `"$sccmVer`"" }
+      if ($sccmComment) { $argList += "-SCCMComment `"$($sccmComment -replace '"', '`"')`"" }
+      if ($sccmPkgID -and $RadSCCMUpdate.Checked) { $argList += "-SCCMPackageID `"$sccmPkgID`"" }
+      if ($ChkSCCMUpdateDPs.Checked) { $argList += "-SCCMUpdateDPs" }
+    }
+  }
+
   $argList += "-Unattended"
-
   $argStr  = $argList -join " "
 
-  # Write a temp launcher script to avoid -Command quoting issues entirely.
-  # For dual-arch builds, both architectures run consecutively in the same script.
-  $launcherPath = Join-Path $env:TEMP "WimWizard_Launch.ps1"
-  $escapedRoot   = $ScriptRoot -replace "'", "''"
-  $escapedScript = $MainScript -replace "'", "''"
-
-  # Pass -ARM64 only when both ISOs present and ARM64 selected; x64 is implicit default
+  $launcherDir  = "$env:ProgramData\WimWizard"
+  if (-not (Test-Path $launcherDir)) { New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null }
+  $launcherPath = Join-Path $launcherDir "WimWizard_Launch.ps1"
   $archSuffix = if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { " -ARM64" } else { "" }
-  $launcherContent = "Set-Location '$escapedRoot'`n& '$escapedScript' $argStr$archSuffix`nexit `$LASTEXITCODE"
-  $Script:OutFile = [System.IO.Path]::GetFileName($out)
-  Set-Content -Path $launcherPath -Value $launcherContent -Encoding UTF8
+  $launcherLines = @(
+    "Set-Location '$($ScriptRoot -replace "'","''")'",
+    "& '$($MainScript -replace "'","''")'  $argStr$archSuffix",
+    "exit `$LASTEXITCODE"
+  )
 
-  # Save settings automatically on Run
+  $Script:OutFile      = [System.IO.Path]::GetFileName($out)
+  $Script:BuiltWimPath = $out
+  $Script:IsPatch      = $false
+  $Script:CompletionPkgName = if ($ChkSCCMAutoImport -and $ChkSCCMAutoImport.Checked -and $Script:SCCMModuleAvailable) { Resolve-SCCMNameTemplate } else { "" }
+  Set-Content -Path $launcherPath -Value $launcherLines -Encoding UTF8
+
   Save-Settings
   $Script:SettingsSnapshot = Get-SettingsSnapshot
 
-  $Script:IsPatch = $ChkPatchMode.Checked
-  if ($Script:IsPatch) {
-    $Script:OutFile = [System.IO.Path]::GetFileName($TxtPatchWim.Text) -replace '_\d{8}\.wim$', "_$(Get-Date -Format 'yyyyMMdd').wim"
-  }
-
   $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
   $Script:BuildProc = Start-Process powershell.exe -ArgumentList $psArgs -Verb RunAs -PassThru
-
-  # Minimize GUI while build runs
+  $Script:LauncherPath = $launcherPath
   $Form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
 
   # Poll every 2s; when process exits restore window and show completion screen
   $Script:BuildTimer = New-Object System.Windows.Forms.Timer
   $Script:BuildTimer.Interval = 2000
   $Script:BuildTimer.Add_Tick({
-    if ($Script:BuildProc.HasExited) {
-      $Script:BuildTimer.Stop(); $Script:BuildTimer.Dispose()
-      $Script:BuildTimer = $null
+    if ($Script:BuildProc -and $Script:BuildProc.HasExited) {
+      $t = $Script:BuildTimer; $Script:BuildTimer = $null
+      $t.Stop(); $t.Dispose()
+      Remove-Item -Path $Script:LauncherPath -Force -ErrorAction SilentlyContinue
       $Form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
-      $Form.Activate()
-      $exitCode = $Script:BuildProc.ExitCode
+      $Form.BringToFront()
+      $exitCode  = $Script:BuildProc.ExitCode
       $succeeded = ($exitCode -eq 0)
+
+      # Write last built WIM path to registry and pre-populate SCCM tab
+      $sccmFailed = $false
+      if ($succeeded) {
+        $builtWimPath = $Script:BuiltWimPath
+        if (Test-Path $RegPath) {
+          Set-ItemProperty $RegPath -Name "SCCM_LastBuiltWim" -Value $builtWimPath -ErrorAction SilentlyContinue
+        }
+        if ($TxtSCCMWimPath) { $TxtSCCMWimPath.Text = $builtWimPath }
+
+        # Note: if -SCCMImport was passed to the engine, it already ran the import
+        # (including moving the WIM to the UNC path). We do NOT attempt a second
+        # import here -- the WIM will no longer be at $builtWimPath after a
+        # successful engine import, so Test-Path would return $false and we would
+        # incorrectly set $sccmFailed = $true.
+      }
+
       if ($succeeded) {
         $LblCompleteIcon.Text      = [char]0x2714
         $LblCompleteIcon.ForeColor = [System.Drawing.Color]::FromArgb(0, 160, 70)
         $LblCompleteMsg.Text       = if ($Script:IsPatch) { "Image patch complete!" } else { "Image build complete!" }
         $LblCompleteMsg.ForeColor  = $ColFg
+        if ($Script:CompletionPkgName) {
+          $LblCompletePkg.Text    = $Script:CompletionPkgName
+          $LblCompletePkg.Visible = $true
+        } else {
+          $LblCompletePkg.Visible = $false
+        }
         $LblCompleteFile.Text      = $Script:OutFile
         $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(0, 160, 70)
+        if ($sccmFailed) {
+          $LblCompleteSCCM.Text    = [char]0x26A0 + "  SCCM import failed - use the SCCM tab to import manually."
+          $LblCompleteSCCM.Visible = $true
+        } else {
+          $LblCompleteSCCM.Visible = $false
+        }
       } else {
         $LblCompleteIcon.Text      = [char]0x2718
         $LblCompleteIcon.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
         $LblCompleteMsg.Text       = "Build failed! (exit code $exitCode)"
         $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
+        $LblCompletePkg.Visible    = $false
         $LblCompleteFile.Text      = "Check the log file in the Output folder for details."
         $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
+        $LblCompleteSCCM.Visible   = $false
       }
+      $LblRunText.Text    = ">  Run"
+      $BtnRun.Enabled     = $true
+      $LblRunText.Enabled = $true
       $PanelBottom.Visible  = $false
       $PanelComplete.BringToFront()
       $PanelComplete.Visible = $true
@@ -1727,11 +3914,8 @@ $Script:RunClick = {
   })
   $Script:BuildTimer.Start()
 }
-
 $BtnRun.Add_Click($Script:RunClick)
 $LblRunText.Add_Click($Script:RunClick)
-
-# -- Ask to save on close -------------------------------------------------------
 $Form.Add_FormClosing({
   param($s, $e)
   if ($PanelComplete.Visible) { $PanelComplete.Visible = $false; $PanelBottom.Visible = $true; return }
@@ -1767,6 +3951,7 @@ $Form.Add_Shown({
   Load-Settings
   # Apply Skip Languages visual state if it was saved as checked
   Update-LangSkipState
+  Update-AppxSkipState
   $Script:SettingsSnapshot = Get-SettingsSnapshot
   Update-UI
 

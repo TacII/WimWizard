@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     WIM Wizard - Windows 11 Image Servicing Tool for SCCM/MECM
@@ -37,6 +37,13 @@
 
 .PARAMETER WimIndex
     Force a specific WIM index. Default: 0 (auto-detect Enterprise).
+    Use this to build a specific edition from a multi-edition ISO, e.g.
+    Windows 11 Pro instead of Enterprise. Run the following to list all
+    available indexes and their edition names before choosing:
+      dism /Get-ImageInfo /ImageFile:<drive>:\sources\install.wim
+    When using WimWizard-GUI.ps1, the Image edition dropdown sets this
+    automatically - manual use of -WimIndex is only needed for scripted
+    or scheduled task invocations.
 
 .PARAMETER SkipUpdates
     Skip downloading and applying Patch Tuesday updates.
@@ -87,6 +94,64 @@
       - Pending package dump before /ResetBase (when no FoDs injected)
     Use when troubleshooting DISM failures or unexpected package states.
 
+.PARAMETER SCCMImport
+    Import the finished WIM into SCCM/MECM as an OS Image package after a
+    successful build. Requires the ConfigurationManager PowerShell module
+    (installed as part of the SCCM/MECM console on this machine).
+    Must be combined with -SCCMServer, -SCCMSiteCode, -SCCMPackagePath and
+    -SCCMPackageName at minimum. SCCM import failure is non-fatal - the WIM
+    is built successfully regardless.
+
+.PARAMETER SCCMServer
+    FQDN of the SCCM/MECM primary site server.
+    Example: -SCCMServer "sccm01.fidelity.local"
+
+.PARAMETER SCCMSiteCode
+    Three-character SCCM/MECM site code.
+    Example: -SCCMSiteCode "FC1"
+
+.PARAMETER SCCMPackagePath
+    UNC path to the folder where the finished WIM file will be read by SCCM.
+    This path must be accessible by the SCCM computer account, not just the
+    user running WimWizard. Do not include the WIM filename - it is appended
+    automatically from -OutputPath.
+    Example: -SCCMPackagePath "\\sccm01\SCCMSources\OSD\OSImages"
+
+.PARAMETER SCCMPackageName
+    Display name for the OS Image package in SCCM.
+    When called from WimWizard-GUI.ps1 this is pre-rendered from the template
+    (e.g. "Windows 11 25H2 - se, no - NetFx3 - 2026-05-10").
+    When calling WimWizard.ps1 directly (e.g. from a scheduled task), provide
+    the fully resolved name as a plain string - no template variables are
+    processed at the command line.
+
+.PARAMETER SCCMVersion
+    Version string written to the SCCM OS Image package properties.
+    Optional - when omitted, WimWizard uses the version already derived from
+    the ISO filename during the build (e.g. "25H2", "24H2 LTSC"). This is
+    available in $CatalogSearchTerms.SafeOSVersion by the time import runs.
+    Provide explicitly only when you want to override the ISO-derived value.
+    Example: -SCCMVersion "25H2"
+
+.PARAMETER SCCMComment
+    Optional description written to the SCCM OS Image package comment field.
+    Leave empty to create the package with a blank comment.
+
+.PARAMETER SCCMPackageID
+    If specified, update this existing SCCM OS Image package instead of
+    creating a new one. The package source path, name, version and comment
+    are all updated to match the current run.
+    Package IDs follow the format <SiteCode><6-digit hex> (e.g. FC100042).
+    Find the ID in the SCCM console: Software Library -> Operating Systems ->
+    Operating System Images -> right-click package -> Properties -> General.
+    When omitted, a new package is created on every run.
+
+.PARAMETER SCCMUpdateDPs
+    After importing or updating the SCCM package, trigger a distribution
+    point update. Sends the WIM content to all currently assigned DPs.
+    DP replication runs asynchronously in SCCM - this parameter only
+    initiates the job and does not wait for completion.
+
 .PARAMETER Unattended
     Answers yes to all prompts and uses defaults for all path inputs.
     Suitable for scheduled tasks and automation pipelines.
@@ -95,12 +160,35 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.1.8
-    Date        : 2026-05-08
+    Version     : 5.2.2
+    Date        : 2026-05-12
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.2.2  Fix: Invoke-SCCMImport now moves the finished WIM to
+           $SCCMPackagePath before calling the CM cmdlet. Previously the WIM
+           was left in the local output folder causing a "Not found"
+           WqlQueryException. Move is skipped when source and destination
+           resolve to the same path. Move failure is surfaced as a warning
+           (non-fatal to the overall build exit code, consistent with
+           existing SCCM import error handling).
+    5.2.1  Fix: -SCCMVersion is now optional. When omitted, Invoke-SCCMImport
+           uses $CatalogSearchTerms.SafeOSVersion - the version string already
+           derived from the ISO filename earlier in the pipeline (e.g. "25H2",
+           "24H2 LTSC"). -Version is omitted from the CM cmdlet call entirely
+           if neither source yields a value. -SCCMVersion parameter help
+           updated accordingly.
+    5.2.0  New: SCCM/MECM import support via -SCCMImport switch and companion
+           parameters (-SCCMServer, -SCCMSiteCode, -SCCMPackagePath,
+           -SCCMPackageName, -SCCMVersion, -SCCMComment, -SCCMPackageID,
+           -SCCMUpdateDPs). Uses ConfigurationManager PowerShell module
+           (requires SCCM console installed on the build machine). Supports
+           both creating new OS Image packages and updating existing ones by
+           Package ID. SCCM import failure is non-fatal - WIM build exit code
+           is not affected. Final summary banner updated to reflect import
+           result. -Help output extended with SCCM parameter reference and
+           scheduled task examples.
     5.1.8  Fix: Invoke-UpdateFolderCleanup no longer deletes old-named .msu/.cab
            files unless a canonical equivalent for the same KB already exists.
            Previously users upgrading from pre-5.1.6 with only an old-named cached
@@ -231,12 +319,22 @@ param(
     [switch]$ARM64,                        # Build ARM64 image
     [string]$FoDList = "",                 # Comma-separated FoD keys to enable (e.g. "NetFx3,RsatAD")
     [switch]$Unattended,
-    [switch]$DebugBuild                    # Extra diagnostics: show full DISM output, dump pending packages before cleanup
+    [switch]$DebugBuild,                   # Extra diagnostics: show full DISM output, dump pending packages before cleanup
+    # SCCM import
+    [switch]$SCCMImport,                   # Import finished WIM into SCCM as an OS Image package
+    [string]$SCCMServer        = "",       # FQDN of SCCM site server, e.g. "sccm01.fidelity.local"
+    [string]$SCCMSiteCode      = "",       # Three-character site code, e.g. "FC1"
+    [string]$SCCMPackagePath   = "",       # UNC path readable by SCCM computer account, e.g. "\\srv\share\OSImages"
+    [string]$SCCMPackageName   = "",       # Resolved display name (variables already substituted by caller)
+    [string]$SCCMVersion       = "",       # Version string written to the package, e.g. "25H2"
+    [string]$SCCMComment       = "",       # Optional description / comment for the package
+    [string]$SCCMPackageID     = "",       # If set: update this existing package instead of creating new
+    [switch]$SCCMUpdateDPs                 # Trigger DP update after import/update
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.1.8"
+$ScriptVersion = "5.2.2"
 
 # Validate architecture selection
 if ($X64 -and $ARM64) {
@@ -246,6 +344,38 @@ if ($X64 -and $ARM64) {
     exit 1
 }
 $Architecture = if ($ARM64) { "arm64" } else { "x64" }
+
+# Validate SCCM parameters when -SCCMImport is specified
+if ($SCCMImport) {
+    $sccmMissing = @()
+    if (-not $SCCMServer)      { $sccmMissing += "-SCCMServer" }
+    if (-not $SCCMSiteCode)    { $sccmMissing += "-SCCMSiteCode" }
+    if (-not $SCCMPackagePath) { $sccmMissing += "-SCCMPackagePath" }
+    if (-not $SCCMPackageName) { $sccmMissing += "-SCCMPackageName" }
+    if ($sccmMissing) {
+        Write-Host ""
+        Write-Host "  [ERR] -SCCMImport requires: $($sccmMissing -join ', ')" -ForegroundColor Red
+        Write-Host "        Run .\WimWizard.ps1 -Help for SCCM usage examples." -ForegroundColor Red
+        Write-Host ""
+        exit 1
+    }
+    if (-not $env:SMS_ADMIN_UI_PATH) {
+        Write-Host ""
+        Write-Host "  [ERR] -SCCMImport requires the SCCM/MECM console to be installed on this machine." -ForegroundColor Red
+        Write-Host "        Environment variable SMS_ADMIN_UI_PATH not found." -ForegroundColor Red
+        Write-Host ""
+        exit 1
+    }
+    $Script:SCCMModulePath = Join-Path $env:SMS_ADMIN_UI_PATH "..\ConfigurationManager.psd1"
+    if (-not (Test-Path $Script:SCCMModulePath)) {
+        Write-Host ""
+        Write-Host "  [ERR] ConfigurationManager.psd1 not found at:" -ForegroundColor Red
+        Write-Host "        $Script:SCCMModulePath" -ForegroundColor Red
+        Write-Host "        Install the SCCM/MECM console on this machine." -ForegroundColor Red
+        Write-Host ""
+        exit 1
+    }
+}
 
 # ARM64 only supports NetFx3 - strip unsupported FoD keys and warn
 if ($ARM64 -and $FoDList -ne "") {
@@ -294,7 +424,9 @@ if ($Help) {
     Write-Host "  -UpdatePath       <path>   Folder with pre-downloaded .msu/.cab files (skips auto-download)"
     Write-Host "  -PatchExistingWim <path>   Patch this WIM with latest updates only (skips LP/Appx steps)"
     Write-Host "  -AppxListPath     <path>   XML app removal list (generated by GUI; uses built-in list if omitted)"
-    Write-Host "  -WimIndex         <int>    WIM index to service (default: auto-detect Enterprise)"
+    Write-Host "  -WimIndex         <int>    WIM index to service (default: 0 = auto-detect Enterprise)"
+    Write-Host "                               Use to build Pro, Education etc. from a multi-edition ISO."
+    Write-Host "                               Run: dism /Get-ImageInfo /ImageFile:<drive>:\sources\install.wim"
     Write-Host "  -X64                       Build x64 image (default when neither -X64 nor -ARM64 is set)"
     Write-Host "  -ARM64                     Build ARM64 image (mutually exclusive with -X64)"
     Write-Host "  -FoDList          <keys>   Features on Demand: NetFx3,RsatAD,RsatGPO,RsatSrvMgr"
@@ -304,7 +436,37 @@ if ($Help) {
     Write-Host "  -SkipAppxRemoval           Skip removal of provisioned Appx packages"
     Write-Host "  -DebugBuild                Extra diagnostics: full DISM output for all steps + pending package dump"
     Write-Host "  -Unattended                No interactive prompts (for GUI/automation use)"
+    Write-Host "  -SCCMImport                Import finished WIM into SCCM after build (requires CM console)"
+    Write-Host "  -SCCMServer       <fqdn>   SCCM site server FQDN"
+    Write-Host "  -SCCMSiteCode     <code>   Three-character site code (e.g. FC1)"
+    Write-Host "  -SCCMPackagePath  <unc>    UNC path where SCCM reads the WIM from"
+    Write-Host "  -SCCMPackageName  <name>   Package display name in SCCM"
+    Write-Host "  -SCCMVersion      <ver>    Version string for the package (e.g. 25H2)"
+    Write-Host "  -SCCMComment      <text>   Optional comment/description for the package"
+    Write-Host "  -SCCMPackageID    <id>     Update existing package (e.g. FC100042) instead of creating new"
+    Write-Host "  -SCCMUpdateDPs             Trigger DP update after import"
     Write-Host "  -Help                      Show this help"
+    Write-Host ""
+    Write-Host "  SCCM IMPORT EXAMPLES" -ForegroundColor White
+    Write-Host "  --------------------"
+    Write-Host "  Create new OS Image package after build:"
+    Write-Host "    .\WimWizard.ps1 -Languages `"se,no`" -FoDList `"NetFx3,RsatAD`" -Unattended ``"
+    Write-Host "      -SCCMImport ``"
+    Write-Host "      -SCCMServer `"sccm01.fidelity.local`" -SCCMSiteCode `"FC1`" ``"
+    Write-Host "      -SCCMPackagePath `"\\sccm01\SCCMSources\OSD\OSImages`" ``"
+    Write-Host "      -SCCMPackageName `"Windows 11 25H2 - se, no - NetFx3, RsatAD - 2026-05-10`" ``"
+    Write-Host "      -SCCMVersion `"25H2`" -SCCMUpdateDPs"
+    Write-Host ""
+    Write-Host "  Update existing package (recommended for monthly patching):"
+    Write-Host "    .\WimWizard.ps1 -Languages `"se,no`" -Unattended ``"
+    Write-Host "      -SCCMImport -SCCMServer `"sccm01.fidelity.local`" -SCCMSiteCode `"FC1`" ``"
+    Write-Host "      -SCCMPackagePath `"\\sccm01\SCCMSources\OSD\OSImages`" ``"
+    Write-Host "      -SCCMPackageName `"Windows 11 25H2 - se, no - 2026-05-10`" ``"
+    Write-Host "      -SCCMVersion `"25H2`" -SCCMPackageID `"FC100042`" -SCCMUpdateDPs"
+    Write-Host ""
+    Write-Host "  NOTE: The SCCM console must be installed on the machine running WimWizard."
+    Write-Host "        The account running the script needs SCCM Full Administrator rights."
+    Write-Host "        -SCCMPackagePath must be a UNC path accessible by the SCCM computer account."
     Write-Host ""
     exit 0
 }
@@ -2571,19 +2733,140 @@ try {
     Dismount-AllISOs
     Write-OK "Source ISOs dismounted"
 
+    # SCCM import (non-fatal - WIM is already safely on disk)
+    $script:SCCMImportFailed  = $false
+    $script:SCCMImportSkipped = (-not $SCCMImport)
+    if ($SCCMImport) {
+        function Invoke-SCCMImport {
+            param([string]$WimPath)
+            Write-Section "SCCM Import"
+            Write-Log "  Server     : $SCCMServer"
+            Write-Log "  Site code  : $SCCMSiteCode"
+            Write-Log "  WIM path   : $WimPath"
+            Write-Log "  Pkg path   : $SCCMPackagePath"
+            Write-Log "  Pkg name   : $SCCMPackageName"
+            Write-Log "  Version    : $(if ($SCCMVersion) { "$SCCMVersion (explicit)" } else { "(will use ISO-derived: $($CatalogSearchTerms.SafeOSVersion))" })"
+            Write-Log "  Mode       : $(if ($SCCMPackageID) { "Update existing ($SCCMPackageID)" } else { "Create new" })"
+            Write-Log "  Update DPs : $($SCCMUpdateDPs.IsPresent)"
+
+            $wimLeaf    = Split-Path $WimPath -Leaf
+            $fullSource = "$SCCMPackagePath\$wimLeaf"
+
+            # Move WIM to package storage path if not already there
+            $srcResolved = [System.IO.Path]::GetFullPath($WimPath).TrimEnd('\')
+            $dstResolved = [System.IO.Path]::GetFullPath($fullSource).TrimEnd('\')
+            if ($srcResolved -ne $dstResolved) {
+                Write-Info "Moving WIM to package storage path..."
+                Write-Log "  Move: $WimPath -> $fullSource"
+                try {
+                    if (-not (Test-Path $SCCMPackagePath)) {
+                        throw "Package storage path not found: $SCCMPackagePath"
+                    }
+                    if (Test-Path $fullSource) { Remove-Item $fullSource -Force -ErrorAction Stop }
+                    try {
+                        Move-Item -Path $WimPath -Destination $fullSource -ErrorAction Stop
+                    } catch {
+                        # If the move failed but the file is already at the destination
+                        # (local path and UNC path resolve to the same folder), treat as success.
+                        if (-not (Test-Path $fullSource)) { throw }
+                    }
+                    Write-OK "WIM moved to $fullSource"
+                    Write-Log "WIM moved to package storage path"
+                } catch {
+                    throw "Failed to move WIM to package storage path: $($_.Exception.Message)"
+                }
+            } else {
+                Write-Info "WIM already in package storage path - skipping move."
+                Write-Log "WIM move skipped (source = destination)"
+            }
+
+            # Resolve version: explicit parameter wins; fall back to what the ISO scan already derived
+            $effectiveVersion = if ($SCCMVersion) { $SCCMVersion } elseif ($CatalogSearchTerms) { $CatalogSearchTerms.SafeOSVersion } else { "" }
+            Write-Log "  Version    : $(if ($effectiveVersion) { $effectiveVersion } else { '(not set)' })"
+
+            try {
+                Import-Module $Script:SCCMModulePath -ErrorAction Stop
+                if (-not (Get-PSDrive -Name $SCCMSiteCode -ErrorAction SilentlyContinue)) {
+                    New-PSDrive -Name $SCCMSiteCode -PSProvider CMSite -Root $SCCMServer -ErrorAction Stop | Out-Null
+                }
+                Push-Location "$SCCMSiteCode`:\"
+
+                if ($SCCMPackageID) {
+                    Write-Info "Updating existing OS Image package $SCCMPackageID ..."
+                    $setParams = @{
+                        Id          = $SCCMPackageID
+                        Path        = $fullSource
+                        NewName     = $SCCMPackageName
+                        Description = $SCCMComment
+                        ErrorAction = 'Stop'
+                    }
+                    if ($effectiveVersion) { $setParams['Version'] = $effectiveVersion }
+                    Set-CMOperatingSystemImage @setParams
+                    Write-OK "Package updated: $SCCMPackageID  ->  $SCCMPackageName"
+                    Write-Log "SCCM package updated: $SCCMPackageID"
+                    if ($SCCMUpdateDPs) {
+                        Write-Info "Triggering distribution point update..."
+                        Update-CMDistributionPoint -OperatingSystemImageId $SCCMPackageID -ErrorAction SilentlyContinue
+                        Write-OK "DP update initiated (runs asynchronously in SCCM)"
+                        Write-Log "SCCM DP update initiated for $SCCMPackageID"
+                    }
+                } else {
+                    Write-Info "Creating new OS Image package..."
+                    $newParams = @{
+                        Name        = $SCCMPackageName
+                        Path        = $fullSource
+                        Description = $SCCMComment
+                        ErrorAction = 'Stop'
+                    }
+                    if ($effectiveVersion) { $newParams['Version'] = $effectiveVersion }
+                    $newPkg = New-CMOperatingSystemImage @newParams
+                    Write-OK "Package created: $($newPkg.PackageID)  ->  $SCCMPackageName"
+                    Write-Log "SCCM package created: $($newPkg.PackageID)"
+                    if ($SCCMUpdateDPs) {
+                        Write-Info "Triggering distribution point update..."
+                        Update-CMDistributionPoint -OperatingSystemImageId $newPkg.PackageID -ErrorAction SilentlyContinue
+                        Write-OK "DP update initiated (runs asynchronously in SCCM)"
+                        Write-Log "SCCM DP update initiated for $($newPkg.PackageID)"
+                    }
+                }
+
+                Pop-Location
+                Write-Log "SCCM import completed successfully"
+            } catch {
+                Pop-Location -ErrorAction SilentlyContinue
+                Write-Host ""
+                Write-Host "  [WARN] SCCM import failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-Host "         The WIM was built successfully - import it manually via the SCCM tab." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Log "WARN: SCCM import failed: $($_.Exception.Message)" "WARN"
+                $script:SCCMImportFailed = $true
+            }
+        }
+        Invoke-SCCMImport -WimPath $OutputPath
+    }
+
     # Done!
     $w = "=" * 66
     Write-Host ""
     Write-Host "+$w+" -ForegroundColor Green
-    Write-Host ("|  [OK] DONE! The WIM file is ready to import into SCCM/MECM{0}|" -f (" " * 8)) -ForegroundColor Green
+    Write-Host ("|  [OK] DONE! The WIM file is ready.{0}|" -f (" " * 31)) -ForegroundColor Green
     Write-Host "+$w+" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  WIM file : $OutputPath  ($sizeMB MB)" -ForegroundColor White
-    Write-Host "  Log file : $logFile" -ForegroundColor White
+    Write-Host "  WIM file   : $OutputPath  ($sizeMB MB)" -ForegroundColor White
+    Write-Host "  Log file   : $logFile" -ForegroundColor White
     Write-Host ""
-    Write-Host "  Next steps in SCCM/MECM:" -ForegroundColor Yellow
-    Write-Host "    1. Copy install.wim to your OS Image source folder" -ForegroundColor White
-    Write-Host "    2. Software Library -> OS Images -> right-click -> Update Distribution Points" -ForegroundColor White
+    if ($script:SCCMImportSkipped) {
+        Write-Host "  SCCM import : Skipped (use -SCCMImport to automate)" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Next steps in SCCM/MECM:" -ForegroundColor Yellow
+        Write-Host "    1. Copy the WIM to your OS Image source folder (UNC path)" -ForegroundColor White
+        Write-Host "    2. Software Library -> OS Images -> right-click -> Update Distribution Points" -ForegroundColor White
+    } elseif ($script:SCCMImportFailed) {
+        Write-Host "  SCCM import : FAILED - import manually from the SCCM tab or console" -ForegroundColor Yellow
+    } else {
+        $dpNote = if ($SCCMUpdateDPs) { " (DP update initiated)" } else { "" }
+        Write-Host "  SCCM import : OK - $SCCMPackageName$dpNote" -ForegroundColor Green
+    }
     Write-Host ""
     Write-Log "=== DONE. $OutputPath ($sizeMB MB) ==="
 
