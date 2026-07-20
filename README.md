@@ -221,13 +221,13 @@ WinRE driver switches affect only the recovery environment (`install.wim\Windows
 
 | Component | Version |
 |-----------|---------|
-| WimWizard.ps1 | 5.3.0 |
-| WimWizard-GUI.ps1 | 2.6.0 |
+| WimWizard.ps1 | 5.3.1 |
+| WimWizard-GUI.ps1 | 2.6.3 |
 | Windows 11 target | 25H2 (26200.x) / 24H2 (26100.x) |
 
 ### Changelog
 
-**5.3.0 / GUI 2.6.0** — Added MECM and local/UNC driver integration, INF metadata parsing, Storage/Network filtering, optional nested WinRE integration, Patch WIM support, GUI persistence and Pester coverage. The MECM boot image remains out of scope.
+**5.3.1 / GUI 2.6.3** — Free-space validation now checks the volume containing the resolved output path. Early validation failures are logged, MECM `PackageType 3` is recognized as a Driver Package, and WinRE category errors report detected category counts. The GUI reports the actual log path after failures, preserves manually entered or browsed output paths, supports copying the reconstructed command with a double-click, and keeps the launcher window open after failed builds until confirmation. Driver integration, INF metadata parsing, Storage/Network filtering, optional nested WinRE integration, Patch WIM support, GUI persistence and Pester coverage remain included. The MECM boot image remains out of scope.
 
 ## Driver integration limitations
 
