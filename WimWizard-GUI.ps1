@@ -14,11 +14,22 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.6.0
+  Version : 2.6.3
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.6.3  Fix: The elevated launcher keeps its PowerShell window open after
+         a failed build and waits for confirmation, so the original error
+         output remains visible. Successful builds close normally.
+  2.6.2  Fixes:
+         - OutputPath entered in the GUI is now reliably preserved when
+           launching WimWizard.ps1, including paths selected via Browse. The
+           command preview updates immediately after changing the output path.
+         - Build failures now show the actual log path, or the expected log
+           location when no log could be created.
+  2.6.1  New: Double-clicking the command preview copies the complete
+         reconstructed command line to the Windows clipboard.
   2.6.0  New: Drivers tab for MECM Driver Packages and local/UNC INF folders.
          Adds Storage/Network filtering, optional WinRE integration, registry
          persistence, lazy package loading, command preview and Patch WIM support.
@@ -664,7 +675,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.6.0"
+$WimWizardVersion = "2.6.3"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -1329,6 +1340,7 @@ $TabOpts.Controls.Add($LblOut)
 
 $y += 22
 $TxtOutput  = New-Object System.Windows.Forms.TextBox
+$Script:UpdatingOutputPreview = $false
 $TxtOutput.Location= New-Object System.Drawing.Point(8, $y)
 $TxtOutput.Size  = New-Object System.Drawing.Size(590, 22)
 $TxtOutput.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
@@ -1350,7 +1362,10 @@ $BtnBrowseOut.Add_Click({
   $dlg.Filter = "WIM files (*.wim)|*.wim"
   $dlg.InitialDirectory = "$ScriptRoot\Output"
   $dlg.FileName = $TxtOutput.Text
-  if ($dlg.ShowDialog() -eq "OK") { $TxtOutput.Text = $dlg.FileName }
+  if ($dlg.ShowDialog() -eq "OK") {
+    $TxtOutput.Text = $dlg.FileName
+    $TxtOutput.Tag  = "manual"
+  }
 })
 
 $y += 22
@@ -3355,7 +3370,27 @@ $LblCmd.Size  = New-Object System.Drawing.Size(548, 54)
 $LblCmd.AutoEllipsis  = $false
 $LblCmd.AutoSize      = $false
 $LblCmd.UseMnemonic  = $false
+$LblCmd.Cursor        = [System.Windows.Forms.Cursors]::Hand
 $PanelBottom.Controls.Add($LblCmd)
+
+$Script:CommandPreviewTip = New-Object System.Windows.Forms.ToolTip
+$Script:CommandPreviewTip.SetToolTip($LblCmd, "Double-click to copy the command to the clipboard.")
+
+$LblCmd.Add_DoubleClick({
+  $commandText = [string]$LblCmd.Text
+  if ([string]::IsNullOrWhiteSpace($commandText)) { return }
+
+  try {
+    [System.Windows.Forms.Clipboard]::SetText($commandText)
+    $Script:CommandPreviewTip.SetToolTip($LblCmd, "Command copied to the clipboard.")
+  } catch {
+    [System.Windows.Forms.MessageBox]::Show(
+      "Could not copy the command to the clipboard:`r`n$($_.Exception.Message)",
+      "Clipboard error",
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+  }
+})
 
 
 $BtnRun  = New-Object System.Windows.Forms.PictureBox
@@ -3692,7 +3727,12 @@ function Update-UI {
 
   # Sync preview to Options tab output field if field is empty or was auto-set
   if ($TxtOutput.Tag -ne "manual") {
-  $TxtOutput.Text = $preview
+    $Script:UpdatingOutputPreview = $true
+    try {
+      $TxtOutput.Text = $preview
+    } finally {
+      $Script:UpdatingOutputPreview = $false
+    }
   }
 
   # Refresh SCCM package name preview
@@ -3701,6 +3741,29 @@ function Update-UI {
   # Update ISO status indicators
   Update-ISOStatus
   Update-RunButton
+}
+
+function Get-BuildLogStatusText {
+  $logDirectory = $null
+
+  if ($Script:PatchOutputFolder) {
+    $logDirectory = $Script:PatchOutputFolder
+  } elseif ($Script:BuiltWimPath) {
+    if (Test-Path -LiteralPath $Script:BuiltWimPath -PathType Container) {
+      $logDirectory = $Script:BuiltWimPath
+    } else {
+      $logDirectory = Split-Path -Path $Script:BuiltWimPath -Parent
+    }
+  }
+  if (-not $logDirectory) { $logDirectory = Join-Path $ScriptRoot "Output" }
+
+  $latestLog = Get-ChildItem -LiteralPath $logDirectory -Filter "WIMServicing_*.log" -File -ErrorAction SilentlyContinue |
+               Sort-Object LastWriteTime -Descending |
+               Select-Object -First 1
+  if ($latestLog) {
+    return "Log: $($latestLog.FullName)"
+  }
+  return "No log found. Expected location: $logDirectory"
 }
 
 # -- Wire up change events ------------------------------------------------------
@@ -3719,7 +3782,13 @@ $TxtSource.Add_TextChanged({ Start-ISOProbe })
 
 # Mark output field as manually edited if user types in it
 $TxtOutput.Add_TextChanged({
-  if ($Form.Focused -or $TxtOutput.Focused) { $TxtOutput.Tag = "manual" }
+  # Text changes made by Update-UI are the generated default and must not
+  # turn the field into a manual value. All other changes, including the
+  # result of the Browse dialog, are explicit user-selected output paths.
+  if (-not $Script:UpdatingOutputPreview) {
+    $TxtOutput.Tag = "manual"
+    Update-UI
+  }
 })
 
 # -- Run button -----------------------------------------------------------------
@@ -3918,8 +3987,14 @@ $Script:RunClick = {
     $launcherPath = Join-Path $launcherDir "WimWizard_Launch.ps1"
     $launcherLines = @(
       "Set-Location '$($ScriptRoot -replace "'","''")'",
-      "& '$($MainScript -replace "'","''")'  $argStr",
-      "exit `$LASTEXITCODE"
+      "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File '$($MainScript -replace "'","''")'  $argStr",
+      "`$exitCode = `$LASTEXITCODE",
+      "if (`$exitCode -ne 0) {",
+      "  Write-Host ''",
+      "  Write-Host 'WimWizard failed. The error output is shown above.' -ForegroundColor Red",
+      "  Read-Host 'Press Enter to close this window' | Out-Null",
+      "}",
+      "exit `$exitCode"
     )
     Set-Content -Path $launcherPath -Value $launcherLines -Encoding UTF8
 
@@ -4038,7 +4113,7 @@ $Script:RunClick = {
           $LblCompleteMsg.Text       = "Patch failed! (exit code $exitCode)"
           $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
           $LblCompletePkg.Visible    = $false
-          $LblCompleteFile.Text      = "Check the log file in the Output folder for details."
+          $LblCompleteFile.Text      = Get-BuildLogStatusText
           $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
           $LblCompleteSCCM.Visible   = $false
           # Clean up temp on failure too
@@ -4185,8 +4260,14 @@ $Script:RunClick = {
   $archSuffix = if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { " -ARM64" } else { "" }
   $launcherLines = @(
     "Set-Location '$($ScriptRoot -replace "'","''")'",
-    "& '$($MainScript -replace "'","''")'  $argStr$archSuffix",
-    "exit `$LASTEXITCODE"
+    "& powershell.exe -NoProfile -ExecutionPolicy Bypass -File '$($MainScript -replace "'","''")'  $argStr$archSuffix",
+    "`$exitCode = `$LASTEXITCODE",
+    "if (`$exitCode -ne 0) {",
+    "  Write-Host ''",
+    "  Write-Host 'WimWizard failed. The error output is shown above.' -ForegroundColor Red",
+    "  Read-Host 'Press Enter to close this window' | Out-Null",
+    "}",
+    "exit `$exitCode"
   )
 
   $Script:OutFile      = [System.IO.Path]::GetFileName($out)
@@ -4257,7 +4338,7 @@ $Script:RunClick = {
         $LblCompleteMsg.Text       = "Build failed! (exit code $exitCode)"
         $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
         $LblCompletePkg.Visible    = $false
-        $LblCompleteFile.Text      = "Check the log file in the Output folder for details."
+        $LblCompleteFile.Text      = Get-BuildLogStatusText
         $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
         $LblCompleteSCCM.Visible   = $false
       }
