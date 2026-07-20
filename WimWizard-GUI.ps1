@@ -14,11 +14,14 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.5.1
+  Version : 2.6.0
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.6.0  New: Drivers tab for MECM Driver Packages and local/UNC INF folders.
+         Adds Storage/Network filtering, optional WinRE integration, registry
+         persistence, lazy package loading, command preview and Patch WIM support.
   2.5.1  Fix: Image edition ComboBox now triggers command preview update on
          selection change (Add_SelectedIndexChanged wired to Update-UI).
          Fix: Receive-Job result coerced to single string to prevent index
@@ -414,6 +417,14 @@ function Save-Settings {
   Set-ItemProperty $RegPath -Name "SCCM_PackageID"   -Value $TxtSCCMPackageID.Text
   Set-ItemProperty $RegPath -Name "SCCM_AutoImport"  -Value ([int]$ChkSCCMAutoImport.Checked)
   Set-ItemProperty $RegPath -Name "SCCM_UpdateDPs"   -Value ([int]$ChkSCCMUpdateDPs.Checked)
+  # Drivers tab - persist the selected Package ID, never the ComboBox position
+  $driverPkgId = if ($CmbDriverPackage.SelectedItem) { [string]$CmbDriverPackage.SelectedItem.Id } else { [string]$Script:SavedDriverPackageID }
+  Set-ItemProperty $RegPath -Name "Driver_Source"       -Value $(if ($RadDriverMECM.Checked) { "MECM" } elseif ($RadDriverPath.Checked) { "Path" } else { "None" })
+  Set-ItemProperty $RegPath -Name "Driver_PackageID"    -Value $driverPkgId
+  Set-ItemProperty $RegPath -Name "Driver_Path"         -Value $TxtDriverPath.Text
+  Set-ItemProperty $RegPath -Name "Driver_Filter"       -Value $CmbDriverFilter.SelectedItem.Value
+  Set-ItemProperty $RegPath -Name "Driver_WinREStorage" -Value ([int]$ChkDriverWinREStorage.Checked)
+  Set-ItemProperty $RegPath -Name "Driver_WinRENetwork" -Value ([int]$ChkDriverWinRENetwork.Checked)
   # Note: SCCM_LastBuiltWim is written separately on build completion, not here
   # Patch WIM tab settings
   Set-ItemProperty $RegPath -Name "PatchWIM_PackageID"   -Value $TxtPatchWimPkgID.Text
@@ -469,6 +480,22 @@ function Load-Settings {
     if ($reg.PSObject.Properties["SCCM_UpdateDPs"])    { $ChkSCCMUpdateDPs.Checked  = [bool]$reg.SCCM_UpdateDPs }
     if ($reg.PSObject.Properties["SCCM_LastBuiltWim"] -and $reg.SCCM_LastBuiltWim) {
       $TxtSCCMWimPath.Text = $reg.SCCM_LastBuiltWim
+    }
+    # Drivers tab settings. The saved package ID is restored without loading
+    # all packages; the user must click Refresh Driver Packages explicitly.
+    if ($reg.PSObject.Properties["Driver_PackageID"]) { $Script:SavedDriverPackageID = [string]$reg.Driver_PackageID }
+    if ($reg.PSObject.Properties["Driver_Path"])      { $TxtDriverPath.Text = [string]$reg.Driver_Path }
+    if ($reg.PSObject.Properties["Driver_Filter"] -and $reg.Driver_Filter -in @("All", "StorageAndNetwork")) {
+      foreach ($filterItem in $CmbDriverFilter.Items) { if ($filterItem.Value -eq $reg.Driver_Filter) { $CmbDriverFilter.SelectedItem = $filterItem; break } }
+    }
+    if ($reg.PSObject.Properties["Driver_WinREStorage"]) { $ChkDriverWinREStorage.Checked = [bool]$reg.Driver_WinREStorage }
+    if ($reg.PSObject.Properties["Driver_WinRENetwork"]) { $ChkDriverWinRENetwork.Checked = [bool]$reg.Driver_WinRENetwork }
+    if ($reg.PSObject.Properties["Driver_Source"]) {
+      switch ([string]$reg.Driver_Source) {
+        "MECM" { $RadDriverMECM.Checked = $true }
+        "Path" { $RadDriverPath.Checked = $true }
+        default { $RadDriverNone.Checked = $true }
+      }
     }
     # Patch WIM tab settings
     if ($reg.PSObject.Properties["PatchWIM_PackageID"])   { $TxtPatchWimPkgID.Text   = $reg.PatchWIM_PackageID }
@@ -637,7 +664,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.4.6"
+$WimWizardVersion = "2.6.0"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -1183,15 +1210,16 @@ function Update-ISOStatus {
 # Show/hide Run button based on ISO status and probe completion
 function Update-RunButton {
   if (-not $Script:ISOStatusPanel -or -not $Script:IndWin -or -not $BtnRun) { return }
+  $driverReady = Test-DriverGUISelection
   if ($ChkPatchMode -and $ChkPatchMode.Checked) {
-    $BtnRun.Visible    = $true
-    $LblRunText.Visible = $true
+    $BtnRun.Visible    = $driverReady
+    $LblRunText.Visible = $driverReady
     return
   }
   # Full build: require Windows ISO indicator to be green and build string resolved
   $isoReady   = $Script:IndWin.Text -match [char]0x2714
   $buildReady = $Script:BuildString -ne '26200.xxxx'
-  $ready = $isoReady -and $buildReady
+  $ready = $isoReady -and $buildReady -and $driverReady
   $BtnRun.Visible    = $ready
   $LblRunText.Visible = $ready
 }
@@ -1908,14 +1936,14 @@ $py   = 10   # internal Y within section panel
 New-PLabel $Sec1 "Server (FQDN):" 10 ($py + 3) | Out-Null
 $TxtSCCMServer = New-PTextBox $Sec1 110 $py 272
 $TxtSCCMServer.Text = ""
-$TxtSCCMServer.Add_TextChanged({ Update-SCCMSummary })
+$TxtSCCMServer.Add_TextChanged({ Update-SCCMSummary; Update-DriverStatus; Update-RunButton })
 
 # Site code
 New-PLabel $Sec1 "Site code:" 394 ($py + 3) | Out-Null
 $TxtSCCMSiteCode = New-PTextBox $Sec1 462 $py 55
 $TxtSCCMSiteCode.Text            = ""
 $TxtSCCMSiteCode.CharacterCasing = "Upper"
-$TxtSCCMSiteCode.Add_TextChanged({ Update-SCCMSummary })
+$TxtSCCMSiteCode.Add_TextChanged({ Update-SCCMSummary; Update-DriverStatus; Update-RunButton })
 
 # Test connection button
 $BtnSCCMTest = New-Object System.Windows.Forms.Button
@@ -2287,7 +2315,245 @@ $Sec4.Controls.Add($BtnSCCMImport)
 # calls Update-SCCMPreview internally - no additional wiring needed here.
 
 # ==============================================================================
-# TAB 6 - PATCH WIM
+# TAB 6 - DRIVERS
+# ================================================================================
+$TabDrivers = New-Tab "  Drivers"
+$Script:SavedDriverPackageID = ""
+$Script:DriverFolderInfCount = 0
+
+$LblDriverIntro = New-Object System.Windows.Forms.Label
+$LblDriverIntro.Text = "Integrate unpacked INF-based drivers into install.wim and optionally winre.wim. The MECM package is resolved again by the CLI at build time."
+$LblDriverIntro.Font = $FontSmall
+$LblDriverIntro.ForeColor = $ColSubtext
+$LblDriverIntro.Location = New-Object System.Drawing.Point(8, 8)
+$LblDriverIntro.Size = New-Object System.Drawing.Size(704, 34)
+$TabDrivers.Controls.Add($LblDriverIntro)
+
+$DriverPanel = New-Object System.Windows.Forms.Panel
+$DriverPanel.Location = New-Object System.Drawing.Point(8, 50)
+$DriverPanel.Size = New-Object System.Drawing.Size(704, 318)
+$DriverPanel.BackColor = $ColSCCMSection
+$TabDrivers.Controls.Add($DriverPanel)
+
+$LblDriverSource = New-Object System.Windows.Forms.Label
+$LblDriverSource.Text = "Driver source"
+$LblDriverSource.Font = $FontBold
+$LblDriverSource.ForeColor = $ColAccent
+$LblDriverSource.Location = New-Object System.Drawing.Point(14, 12)
+$LblDriverSource.AutoSize = $true
+$DriverPanel.Controls.Add($LblDriverSource)
+
+$RadDriverNone = New-Object System.Windows.Forms.RadioButton
+$RadDriverNone.Text = "No driver integration"
+$RadDriverNone.Checked = $true
+$RadDriverNone.ForeColor = $ColFg
+$RadDriverNone.BackColor = [System.Drawing.Color]::Transparent
+$RadDriverNone.AutoSize = $true
+$RadDriverNone.Location = New-Object System.Drawing.Point(18, 38)
+$DriverPanel.Controls.Add($RadDriverNone)
+
+$RadDriverMECM = New-Object System.Windows.Forms.RadioButton
+$RadDriverMECM.Text = "MECM driver package"
+$RadDriverMECM.ForeColor = $ColFg
+$RadDriverMECM.BackColor = [System.Drawing.Color]::Transparent
+$RadDriverMECM.AutoSize = $true
+$RadDriverMECM.Location = New-Object System.Drawing.Point(210, 38)
+$DriverPanel.Controls.Add($RadDriverMECM)
+
+$RadDriverPath = New-Object System.Windows.Forms.RadioButton
+$RadDriverPath.Text = "Driver folder"
+$RadDriverPath.ForeColor = $ColFg
+$RadDriverPath.BackColor = [System.Drawing.Color]::Transparent
+$RadDriverPath.AutoSize = $true
+$RadDriverPath.Location = New-Object System.Drawing.Point(410, 38)
+$DriverPanel.Controls.Add($RadDriverPath)
+
+$BtnDriverRefresh = New-Object System.Windows.Forms.Button
+$BtnDriverRefresh.Text = "Refresh Driver Packages"
+$BtnDriverRefresh.Location = New-Object System.Drawing.Point(18, 72)
+$BtnDriverRefresh.Size = New-Object System.Drawing.Size(180, 24)
+$BtnDriverRefresh.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnDriverRefresh.ForeColor = $ColFg
+$BtnDriverRefresh.FlatStyle = "Flat"
+$DriverPanel.Controls.Add($BtnDriverRefresh)
+
+$CmbDriverPackage = New-Object System.Windows.Forms.ComboBox
+$CmbDriverPackage.Location = New-Object System.Drawing.Point(210, 72)
+$CmbDriverPackage.Size = New-Object System.Drawing.Size(470, 24)
+$CmbDriverPackage.DropDownStyle = "DropDownList"
+$CmbDriverPackage.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$CmbDriverPackage.ForeColor = $ColFg
+$CmbDriverPackage.DisplayMember = "Display"
+$DriverPanel.Controls.Add($CmbDriverPackage)
+
+$TxtDriverPath = New-Object System.Windows.Forms.TextBox
+$TxtDriverPath.Location = New-Object System.Drawing.Point(18, 112)
+$TxtDriverPath.Size = New-Object System.Drawing.Size(560, 22)
+$TxtDriverPath.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$TxtDriverPath.ForeColor = $ColFg
+$TxtDriverPath.BorderStyle = "FixedSingle"
+$DriverPanel.Controls.Add($TxtDriverPath)
+
+$BtnBrowseDriver = New-Object System.Windows.Forms.Button
+$BtnBrowseDriver.Text = "Browse..."
+$BtnBrowseDriver.Location = New-Object System.Drawing.Point(590, 112)
+$BtnBrowseDriver.Size = New-Object System.Drawing.Size(90, 22)
+$BtnBrowseDriver.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowseDriver.ForeColor = $ColFg
+$BtnBrowseDriver.FlatStyle = "Flat"
+$DriverPanel.Controls.Add($BtnBrowseDriver)
+
+$LblDriverStatus = New-Object System.Windows.Forms.Label
+$LblDriverStatus.Text = "No driver source selected."
+$LblDriverStatus.Font = $FontSmall
+$LblDriverStatus.ForeColor = $ColSubtext
+$LblDriverStatus.Location = New-Object System.Drawing.Point(18, 142)
+$LblDriverStatus.Size = New-Object System.Drawing.Size(662, 34)
+$DriverPanel.Controls.Add($LblDriverStatus)
+
+$LblDriverFilter = New-Object System.Windows.Forms.Label
+$LblDriverFilter.Text = "Filter:"
+$LblDriverFilter.Font = $FontSmall
+$LblDriverFilter.ForeColor = $ColSubtext
+$LblDriverFilter.Location = New-Object System.Drawing.Point(18, 188)
+$LblDriverFilter.AutoSize = $true
+$DriverPanel.Controls.Add($LblDriverFilter)
+
+$CmbDriverFilter = New-Object System.Windows.Forms.ComboBox
+$CmbDriverFilter.Location = New-Object System.Drawing.Point(70, 184)
+$CmbDriverFilter.Size = New-Object System.Drawing.Size(230, 24)
+$CmbDriverFilter.DropDownStyle = "DropDownList"
+$CmbDriverFilter.DisplayMember = "Display"
+$CmbDriverFilter.Items.Add([pscustomobject]@{ Display = "All drivers"; Value = "All" }) | Out-Null
+$CmbDriverFilter.Items.Add([pscustomobject]@{ Display = "Storage and network only"; Value = "StorageAndNetwork" }) | Out-Null
+$CmbDriverFilter.SelectedIndex = 0
+$CmbDriverFilter.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$CmbDriverFilter.ForeColor = $ColFg
+$DriverPanel.Controls.Add($CmbDriverFilter)
+
+$ChkDriverInstall = New-DarkCheckbox -Text "Integrate drivers into install.wim (required when a source is selected)" -Checked $true
+$ChkDriverInstall.Location = New-Object System.Drawing.Point(18, 220)
+$ChkDriverInstall.Width = 600
+$ChkDriverInstall.Enabled = $false
+$DriverPanel.Controls.Add($ChkDriverInstall)
+
+$ChkDriverWinREStorage = New-DarkCheckbox -Text "Also integrate storage drivers into WinRE" -Checked $false
+$ChkDriverWinREStorage.Location = New-Object System.Drawing.Point(18, 248)
+$ChkDriverWinREStorage.Width = 500
+$DriverPanel.Controls.Add($ChkDriverWinREStorage)
+
+$ChkDriverWinRENetwork = New-DarkCheckbox -Text "Also integrate network drivers into WinRE" -Checked $false
+$ChkDriverWinRENetwork.Location = New-Object System.Drawing.Point(18, 276)
+$ChkDriverWinRENetwork.Width = 500
+$DriverPanel.Controls.Add($ChkDriverWinRENetwork)
+
+function Update-DriverStatus {
+  $source = if ($RadDriverMECM.Checked) { "MECM" } elseif ($RadDriverPath.Checked) { "Path" } else { "None" }
+  if ($source -eq "None") {
+    $LblDriverStatus.Text = "No driver source selected."
+    $LblDriverStatus.ForeColor = $ColSubtext
+    $Script:DriverFolderInfCount = 0
+  } elseif ($source -eq "Path") {
+    $path = $TxtDriverPath.Text.Trim()
+    if (-not $path) {
+      $LblDriverStatus.Text = "Select a local or UNC driver folder."
+      $LblDriverStatus.ForeColor = $ColWarn
+      $Script:DriverFolderInfCount = 0
+    } elseif (-not (Test-Path -LiteralPath $path -PathType Container)) {
+      $LblDriverStatus.Text = "Path not found or is not a directory."
+      $LblDriverStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+      $Script:DriverFolderInfCount = 0
+    } else {
+      try {
+        $count = @(Get-ChildItem -LiteralPath $path -Filter "*.inf" -File -Recurse -ErrorAction Stop).Count
+        $Script:DriverFolderInfCount = $count
+        $LblDriverStatus.Text = "Path available - $count INF file(s) found recursively."
+        $LblDriverStatus.ForeColor = if ($count -gt 0) { [System.Drawing.Color]::FromArgb(0, 200, 80) } else { $ColWarn }
+      } catch {
+        $Script:DriverFolderInfCount = 0
+        $LblDriverStatus.Text = "Could not inspect path: $($_.Exception.Message)"
+        $LblDriverStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+      }
+    }
+  } else {
+    if (-not $Script:SCCMModuleAvailable) {
+      $LblDriverStatus.Text = "ConfigurationManager module not available."
+      $LblDriverStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+    } elseif ($CmbDriverPackage.SelectedItem) {
+      $LblDriverStatus.Text = "Package selected: $($CmbDriverPackage.SelectedItem.Display)"
+      $LblDriverStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+    } else {
+      $saved = if ($Script:SavedDriverPackageID) { " Saved Package ID: $Script:SavedDriverPackageID." } else { "" }
+      $LblDriverStatus.Text = "No package selected. Click Refresh Driver Packages.$saved"
+      $LblDriverStatus.ForeColor = $ColWarn
+    }
+  }
+  $enabled = $source -ne "None"
+  $BtnDriverRefresh.Enabled = $source -eq "MECM" -and $Script:SCCMModuleAvailable
+  $CmbDriverPackage.Enabled = $source -eq "MECM" -and $Script:SCCMModuleAvailable
+  $TxtDriverPath.Enabled = $source -eq "Path"
+  $BtnBrowseDriver.Enabled = $source -eq "Path"
+  $ChkDriverInstall.Enabled = $enabled
+  $ChkDriverWinREStorage.Enabled = $enabled
+  $ChkDriverWinRENetwork.Enabled = $enabled
+}
+
+$BtnDriverRefresh.Add_Click({
+  $server = $TxtSCCMServer.Text.Trim(); $site = $TxtSCCMSiteCode.Text.Trim().ToUpper()
+  if (-not $Script:SCCMModuleAvailable) { Update-DriverStatus; return }
+  if (-not $server -or -not $site) {
+    $LblDriverStatus.Text = "Enter SCCM server and site code on the SCCM tab first."
+    $LblDriverStatus.ForeColor = $ColWarn
+    return
+  }
+  $BtnDriverRefresh.Enabled = $false
+  $LblDriverStatus.Text = "Loading Driver Packages..."
+  try {
+    Import-Module $Script:SCCMModulePath -ErrorAction Stop
+    $drive = Get-PSDrive -Name $site -ErrorAction SilentlyContinue
+    if (-not $drive) { New-PSDrive -Name $site -PSProvider CMSite -Root $server -ErrorAction Stop | Out-Null }
+    Push-Location "$site`:" -ErrorAction Stop
+    try {
+      $packages = @(Get-CMDriverPackage -Fast -ErrorAction Stop | Sort-Object Name)
+    } finally { Pop-Location -ErrorAction SilentlyContinue }
+    $CmbDriverPackage.Items.Clear()
+    foreach ($pkg in $packages) {
+      $item = [pscustomobject]@{ Display = "$($pkg.Name) [$($pkg.PackageID)]"; Id = [string]$pkg.PackageID }
+      $CmbDriverPackage.Items.Add($item) | Out-Null
+    }
+    if ($packages.Count -eq 0) {
+      $LblDriverStatus.Text = "No Driver Packages found."
+      $LblDriverStatus.ForeColor = $ColWarn
+    } else {
+      for ($i = 0; $i -lt $CmbDriverPackage.Items.Count; $i++) {
+        if ($CmbDriverPackage.Items[$i].Id -eq $Script:SavedDriverPackageID) { $CmbDriverPackage.SelectedIndex = $i; break }
+      }
+      $LblDriverStatus.Text = "$($packages.Count) Driver Package(s) loaded. Select one."
+      $LblDriverStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+    }
+  } catch {
+    $LblDriverStatus.Text = "Could not load packages (module/site unavailable): $($_.Exception.Message)"
+    $LblDriverStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+  } finally { Update-DriverStatus }
+})
+$BtnBrowseDriver.Add_Click({
+  $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dlg.Description = "Select a folder containing unpacked INF drivers"
+  if ($TxtDriverPath.Text -and (Test-Path -LiteralPath $TxtDriverPath.Text -PathType Container)) { $dlg.SelectedPath = $TxtDriverPath.Text }
+  if ($dlg.ShowDialog() -eq "OK") { $TxtDriverPath.Text = $dlg.SelectedPath }
+})
+$TxtDriverPath.Add_TextChanged({ Update-DriverStatus; Update-UI })
+$CmbDriverPackage.Add_SelectedIndexChanged({
+  if ($CmbDriverPackage.SelectedItem) { $Script:SavedDriverPackageID = [string]$CmbDriverPackage.SelectedItem.Id }
+  Update-DriverStatus; Update-UI
+})
+$CmbDriverFilter.Add_SelectedIndexChanged({ Update-UI })
+foreach ($radio in @($RadDriverNone, $RadDriverMECM, $RadDriverPath)) { $radio.Add_CheckedChanged({ Update-DriverStatus; Update-UI }) }
+$ChkDriverWinREStorage.Add_CheckedChanged({ Update-UI })
+$ChkDriverWinRENetwork.Add_CheckedChanged({ Update-UI })
+
+# ===============================================================================
+# TAB 7 - PATCH WIM
 # ==============================================================================
 $TabPatchWim = New-Tab "  Patch WIM"
 
@@ -2791,7 +3057,7 @@ $TxtPatchWimOutName.Add_TextChanged({
 })
 
 # ==============================================================================
-# TAB 7 - HELP
+# TAB 8 - HELP
 # ==============================================================================
 $TabHelp = New-Tab "  Help"
 
@@ -2893,6 +3159,24 @@ RSAT checkboxes are automatically hidden when ARM64 architecture is
 detected (only one Windows ISO in source folder, ARM64 type).
 
 
+TAB: DRIVERS
+------------
+Choose "MECM driver package" and click "Refresh Driver Packages" to load
+packages after entering the SCCM server and site code on the SCCM tab. The
+GUI stores only the selected Package ID; the full package is resolved again
+when the build starts. The package list is never loaded automatically.
+
+Alternatively choose "Driver folder" and enter a local or UNC folder. The
+folder is searched recursively and must contain unpacked INF-based drivers.
+EXE and MSI driver packages are not supported. "All" selects every valid INF;
+"StorageAndNetwork" selects only Storage and Network classes.
+
+The install.wim option is always enabled when a source is selected. The two
+WinRE checkboxes add only the selected Storage or Network INF files to the
+recovery environment inside install.wim. They do not modify the MECM boot.wim.
+Drivers for task-sequence boot are still maintained separately in MECM.
+
+
 TAB: SCCM
 ---------
 Automate importing the finished WIM into SCCM/MECM as an OS Image package.
@@ -2989,6 +3273,23 @@ Patch existing:
 
 Custom app list (generated by GUI):
   .\WimWizard.ps1 -Languages "se" -AppxListPath "WimWizard-AppxList.xml" -Unattended
+
+All drivers from an MECM Driver Package:
+  .\WimWizard.ps1 -DriverPackageID "ABC00123" -SCCMServer "mecm01.contoso.local" `
+    -SCCMSiteCode "ABC" -DriverFilter All -Unattended
+
+Storage and Network drivers from MECM, Storage also into WinRE:
+  .\WimWizard.ps1 -DriverPackageID "ABC00123" -SCCMServer "mecm01.contoso.local" `
+    -SCCMSiteCode "ABC" -DriverFilter StorageAndNetwork -AddStorageDriversToWinRE -Unattended
+
+Drivers from a UNC folder:
+  .\WimWizard.ps1 -DriverPath "\\fileserver\Drivers\Dell\Latitude-5550" `
+    -DriverFilter All -Unattended
+
+Patch an existing WIM with both WinRE driver categories:
+  .\WimWizard.ps1 -PatchExistingWim "D:\Images\Windows11.wim" `
+    -DriverPath "D:\Drivers\Latitude-5550" -DriverFilter StorageAndNetwork `
+    -AddStorageDriversToWinRE -AddNetworkDriversToWinRE -SkipUpdates -Unattended
 
 Build and create new SCCM package (scheduled task example):
   .\WimWizard.ps1 -Languages "se,no" -FoDList "NetFx3,RsatAD" -Unattended `
@@ -3215,12 +3516,45 @@ $PanelComplete.Controls.Add($BtnCompleteOK)
 
 $Script:SettingsSnapshot = ""
 
+function Get-DriverCommandArguments {
+  $parts = @()
+  if ($RadDriverMECM.Checked) {
+    if (-not $CmbDriverPackage.SelectedItem) { return "" }
+    $id = [string]$CmbDriverPackage.SelectedItem.Id
+    if (-not $id -or -not $TxtSCCMServer.Text.Trim() -or -not $TxtSCCMSiteCode.Text.Trim()) { return "" }
+    $parts += "-DriverPackageID `"$id`""
+    $parts += "-SCCMServer `"$($TxtSCCMServer.Text.Trim())`""
+    $parts += "-SCCMSiteCode `"$($TxtSCCMSiteCode.Text.Trim().ToUpper())`""
+  } elseif ($RadDriverPath.Checked) {
+    $path = $TxtDriverPath.Text.Trim()
+    if (-not $path -or $Script:DriverFolderInfCount -le 0 -or -not (Test-Path -LiteralPath $path -PathType Container)) { return "" }
+    $parts += "-DriverPath `"$path`""
+  } else {
+    return ""
+  }
+  $parts += "-DriverFilter $([string]$CmbDriverFilter.SelectedItem.Value)"
+  if ($ChkDriverWinREStorage.Checked) { $parts += "-AddStorageDriversToWinRE" }
+  if ($ChkDriverWinRENetwork.Checked) { $parts += "-AddNetworkDriversToWinRE" }
+  return ($parts -join " ")
+}
+
+function Test-DriverGUISelection {
+  if ($RadDriverNone.Checked) { return $true }
+  if ($RadDriverMECM.Checked) {
+    return $Script:SCCMModuleAvailable -and $CmbDriverPackage.SelectedItem -and
+           $TxtSCCMServer.Text.Trim() -and $TxtSCCMSiteCode.Text.Trim()
+  }
+  return $TxtDriverPath.Text.Trim() -and $Script:DriverFolderInfCount -gt 0 -and
+         (Test-Path -LiteralPath $TxtDriverPath.Text.Trim() -PathType Container)
+}
+
 function Get-SettingsSnapshot {
   $langs = ($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $apps  = ($AppCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $fods  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $sccm  = "$($TxtSCCMServer.Text)|$($TxtSCCMSiteCode.Text)|$($TxtSCCMPath.Text)|$($TxtSCCMNameTemplate.Text)|$($TxtSCCMComment.Text)|$([int]$RadSCCMUpdate.Checked)|$($TxtSCCMPackageID.Text)|$([int]$ChkSCCMAutoImport.Checked)|$([int]$ChkSCCMUpdateDPs.Checked)"
-  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$sccm"
+  $driver = "$($RadDriverNone.Checked)|$($RadDriverMECM.Checked)|$($RadDriverPath.Checked)|$($Script:SavedDriverPackageID)|$($TxtDriverPath.Text)|$($CmbDriverFilter.SelectedItem.Value)|$($ChkDriverWinREStorage.Checked)|$($ChkDriverWinRENetwork.Checked)"
+  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$sccm|$driver"
 }
 
 # -- Build command string -------------------------------------------------------
@@ -3238,7 +3572,11 @@ function Build-CommandString {
       $pkgName = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
       $wimArg  = if ($Script:PatchWimSCCMFileName) { $Script:PatchWimSCCMFileName } else { "<WIM from pkg $($TxtPatchWimPkgID.Text.Trim())>" }
       $cmd += " -PatchExistingWim `"$wimArg`""
-      $cmd += " -OutputPath `".\Output\`" -Unattended"
+      $cmd += " -OutputPath `".\Output\`""
+      $driverArgs = Get-DriverCommandArguments
+      if ($driverArgs) { $cmd += " $driverArgs" }
+      if ($ChkSkipUpdates -and $ChkSkipUpdates.Checked) { $cmd += " -SkipUpdates" }
+      $cmd += " -Unattended"
       return @{ Cmd = $cmd; SelectedCodes = @(); Preview = "" }
     } elseif ($localSrc) {
       $cmd += " -PatchExistingWim `"$($TxtPatchWim.Text)`""
@@ -3249,6 +3587,8 @@ function Build-CommandString {
       $cmd += " -PatchExistingWim `"<select a source above>`""
     }
 
+    $driverArgs = Get-DriverCommandArguments
+    if ($driverArgs) { $cmd += " $driverArgs" }
     if ($ChkSkipUpdates -and $ChkSkipUpdates.Checked) { $cmd += " -SkipUpdates" }
     $cmd += " -Unattended"
     return @{ Cmd = $cmd; SelectedCodes = @(); Preview = "" }
@@ -3282,6 +3622,8 @@ function Build-CommandString {
     $previewFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
     if ($previewFoDs.Count -gt 0) { $cmd += " -FoDList `"$($previewFoDs -join ',')`"" }
   }
+  $driverArgs = Get-DriverCommandArguments
+  if ($driverArgs) { $cmd += " $driverArgs" }
   if ($CmbEdition.Enabled -and $CmbEdition.SelectedItem) {
     $selName = [string]$CmbEdition.SelectedItem
     $isEnt   = $selName -match 'Enterprise' -and $selName -notmatch 'Evaluation'
@@ -3407,6 +3749,16 @@ $Script:RunClick = {
 
   # Helper: restore Run button regardless of how we exit
   $resetRunButton = { $LblRunText.Text = ">  Run"; $BtnRun.Enabled = $true; $LblRunText.Enabled = $true }
+
+  if (-not (Test-DriverGUISelection)) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "The selected driver source is not valid. Choose a loaded MECM Driver Package or a folder containing at least one INF file.",
+      "Invalid driver source", "OK", "Warning") | Out-Null
+    $Tabs.SelectedTab = $TabDrivers
+    & $resetRunButton
+    Update-DriverStatus
+    return
+  }
 
   # ---- PATCH MODE ----
   if ($ChkPatchMode.Checked) {
@@ -3554,6 +3906,8 @@ $Script:RunClick = {
     }
 
     if ($ChkSkipUpdates.Checked) { $argList += "-SkipUpdates" }
+    $driverArgs = Get-DriverCommandArguments
+    if ($driverArgs) { $argList += $driverArgs }
     $argList += "-Unattended"
 
     $Script:IsPatch = $true
@@ -3793,6 +4147,9 @@ $Script:RunClick = {
   if ($ChkSkipUpdates.Checked)  { $argList += "-SkipUpdates" }
   if ($ChkSkipLPs.Checked)      { $argList += "-SkipLanguagePacks" }
   if ($ChkSkipAppx.Checked)     { $argList += "-SkipAppxRemoval" }
+
+  $driverArgs = Get-DriverCommandArguments
+  if ($driverArgs) { $argList += $driverArgs }
 
   $selectedFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
   if ($selectedFoDs.Count -gt 0) { $argList += "-FoDList `"$($selectedFoDs -join ',')`"" }
