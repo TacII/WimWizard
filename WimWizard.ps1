@@ -177,12 +177,22 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.3.0
+    Version     : 5.3.1
     Date        : 2026-05-12
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.3.1  Fixes:
+           - Free-space validation now checks the volume containing the
+             resolved output path instead of always checking the system drive.
+           - Logging is initialized before validation and external operations;
+             early MECM, driver and update errors are now retained in a log.
+           - MECM PackageType 3 is correctly recognized as a Driver Package.
+           - MECM UNC source paths are validated through the FileSystem
+             provider with the underlying access error preserved.
+           - WinRE category failures now include detected category counts;
+             INF section whitespace parsing is handled correctly.
     5.3.0  New: Driver integration from MECM Driver Packages or local/UNC paths.
            INF metadata parsing, Storage/Network filtering, install.wim and
            winre.wim integration, PatchExistingWim support, and validation.
@@ -360,10 +370,40 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.3.0"
+$ScriptVersion = "5.3.1"
 
 $ScriptRoot = $PSScriptRoot
 if (-not $ScriptRoot) { $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+# Initialize logging before any validation or external operation. This ensures
+# that failures during parameter, MECM, source, update or driver validation are
+# still written to a log. The final output path is reconciled later once the
+# image metadata and any interactive output selection are known.
+if (-not $OutputPath) { $OutputPath = "$ScriptRoot\Output\install.wim" }
+$earlyOutputDir = Split-Path $OutputPath -Parent
+if (-not [System.IO.Path]::GetExtension($OutputPath)) {
+    $earlyOutputDir = $OutputPath
+}
+if (-not $earlyOutputDir) { $earlyOutputDir = (Get-Location).Path }
+try {
+    if (-not (Test-Path -LiteralPath $earlyOutputDir -PathType Container)) {
+        New-Item -Path $earlyOutputDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    }
+} catch {
+    # If the requested output location is not accessible, retain a diagnostic
+    # fallback under the script folder instead of losing the early error.
+    $earlyOutputDir = Join-Path $ScriptRoot "Output"
+    if (-not (Test-Path -LiteralPath $earlyOutputDir -PathType Container)) {
+        New-Item -Path $earlyOutputDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+$logFile = Join-Path $earlyOutputDir ("WIMServicing_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmm"))
+function Write-Log {
+    param([string]$msg, [string]$level = "INFO")
+    [System.IO.File]::AppendAllText($logFile, ("[{0}] [{1}] {2}`r`n" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $level, $msg))
+}
+Write-Log "=== WIM Wizard v$ScriptVersion started ==="
+
 $DriverHelperPath = Join-Path $ScriptRoot "WimWizard-Drivers.ps1"
 if (-not (Test-Path -LiteralPath $DriverHelperPath -PathType Leaf)) {
     Write-Host "  [ERR] Shared driver helper not found: $DriverHelperPath" -ForegroundColor Red
@@ -384,7 +424,9 @@ $Architecture = if ($ARM64) { "arm64" } else { "x64" }
 try {
     $DriverParameterState = Assert-DriverSourceParameters -DriverPackageID $DriverPackageID -DriverPath $DriverPath -AddStorageDriversToWinRE:$AddStorageDriversToWinRE -AddNetworkDriversToWinRE:$AddNetworkDriversToWinRE
 } catch {
-    Write-Host "  [ERR] $($_.Exception.Message)" -ForegroundColor Red
+    $validationError = $_.Exception.Message
+    Write-Log "ERROR: Parameter validation failed: $validationError" "ERROR"
+    Write-Host "  [ERR] $validationError" -ForegroundColor Red
     exit 1
 }
 
@@ -532,7 +574,6 @@ Write-Verbose "Script root: $ScriptRoot"
 
 # Apply defaults that depend on $ScriptRoot (cannot be set in param() block)
 if (-not $SourceFolder) { $SourceFolder = "$ScriptRoot\ISO-Source" }
-if (-not $OutputPath)   { $OutputPath   = "$ScriptRoot\Output\install.wim" }
 
 # Full locale tag table - maps 2-letter country code to all matching locale tags in the LP ISO.
 # Multiple matches (e.g. "in" -> bn-IN, en-IN, hi-IN, ta-IN) are all installed.
@@ -1454,15 +1495,6 @@ if ($LASTEXITCODE -gt 1) {
 }
 Write-OK "DISM available"
 
-# Disk space
-$drive  = Get-PSDrive ($env:SystemDrive.TrimEnd(':'))
-$freeGB = [math]::Round($drive.Free / 1GB, 1)
-if ($freeGB -lt 30) {
-    Write-Warn "Only $freeGB GB free. At least 30 GB recommended."
-} else {
-    Write-OK "$freeGB GB free disk space"
-}
-
 # Internet access
 $internetOK = $false
 try {
@@ -1905,6 +1937,38 @@ if (-not (Test-Path $outputDir)) { New-Item $outputDir -ItemType Directory -Forc
 if (Test-Path $OutputPath) { Write-Warn "File already exists and will be overwritten." }
 Write-OK "Output: $OutputPath"
 
+# Disk space - check the volume that contains the resolved output path.
+# This must happen after the output prompt so interactive paths are included.
+try {
+    $outputFullPath = [System.IO.Path]::GetFullPath($outputDir)
+    $outputRoot = [System.IO.Path]::GetPathRoot($outputFullPath)
+    $outputDrive = $null
+
+    if ($outputRoot -match '^[A-Za-z]:\\$') {
+        $outputDrive = Get-PSDrive -Name $outputRoot.Substring(0, 1) -PSProvider FileSystem -ErrorAction Stop
+    } else {
+        # A UNC path may expose a provider drive through the FileSystem item.
+        # If it does not, do not silently fall back to the system drive.
+        $outputItem = Get-Item -LiteralPath $outputDir -ErrorAction Stop
+        if ($outputItem.PSDrive -and $outputItem.PSDrive.Name) {
+            $outputDrive = Get-PSDrive -Name $outputItem.PSDrive.Name -PSProvider FileSystem -ErrorAction Stop
+        }
+    }
+
+    if ($outputDrive) {
+        $freeGB = [math]::Round($outputDrive.Free / 1GB, 1)
+        if ($freeGB -lt 30) {
+            Write-Warn "Only $freeGB GB free on output drive $($outputDrive.Name):. At least 30 GB recommended."
+        } else {
+            Write-OK "$freeGB GB free on output drive $($outputDrive.Name):"
+        }
+    } else {
+        Write-Warn "Could not determine free space for output path '$OutputPath'."
+    }
+} catch {
+    Write-Warn "Could not check free space for output path '$OutputPath': $($_.Exception.Message)"
+}
+
 #endregion
 
 #region ── Driver source validation and discovery ─────────────────────────────
@@ -1948,15 +2012,23 @@ if (-not [string]::IsNullOrWhiteSpace($DriverPackageID) -or -not [string]::IsNul
         if ($DriverSelection.Selected.Count -eq 0) {
             throw "DriverFilter '$DriverFilter' selected no matching drivers from '$($DriverSourceInfo.SourcePath)'."
         }
+        $storageInfCount = @($DriverMetadata | Where-Object { $_.Category -eq 'Storage' }).Count
+        $networkInfCount = @($DriverMetadata | Where-Object { $_.Category -eq 'Network' }).Count
+        $otherInfCount   = @($DriverMetadata | Where-Object { $_.Category -eq 'Other' }).Count
+        $unknownInfCount = @($DriverMetadata | Where-Object { $_.Category -eq 'Unknown' }).Count
         if ($AddStorageDriversToWinRE) { $DriverWinRESelection += @($DriverMetadata | Where-Object { $_.Category -eq 'Storage' }) }
         if ($AddNetworkDriversToWinRE) { $DriverWinRESelection += @($DriverMetadata | Where-Object { $_.Category -eq 'Network' }) }
-        if (($AddStorageDriversToWinRE -and @($DriverMetadata | Where-Object { $_.Category -eq 'Storage' }).Count -eq 0) -or
-            ($AddNetworkDriversToWinRE -and @($DriverMetadata | Where-Object { $_.Category -eq 'Network' }).Count -eq 0)) {
-            throw 'One or more requested WinRE driver categories have no matching INF files in the selected source.'
+        $missingWinRECategories = @()
+        if ($AddStorageDriversToWinRE -and $storageInfCount -eq 0) { $missingWinRECategories += 'Storage' }
+        if ($AddNetworkDriversToWinRE -and $networkInfCount -eq 0) { $missingWinRECategories += 'Network' }
+        if ($missingWinRECategories.Count -gt 0) {
+            throw "Requested WinRE category/categories have no matching INF files: $($missingWinRECategories -join ', '). Detected categories: Storage=$storageInfCount, Network=$networkInfCount, Other=$otherInfCount, Unknown=$unknownInfCount. WinRE selection uses INF Class/ClassGuid metadata only."
         }
         Write-OK "Driver discovery complete: $($DriverSelection.Selected.Count) selected of $($DriverMetadata.Count) INF file(s)"
     } catch {
-        Write-Fail $_.Exception.Message
+        $driverError = $_.Exception.Message
+        Write-Log "ERROR: Driver source validation failed: $driverError" "ERROR"
+        Write-Fail $driverError
         Dismount-AllISOs
         exit 1
     }
@@ -2037,21 +2109,24 @@ $mountDir   = Join-Path $workRoot "Mount"
 $workWim    = Join-Path $workRoot "install_work.wim"
 $scratchDir = Join-Path $workRoot "Scratch"   # DISM scratch space - avoids system drive disk-full
 
-# Log file goes next to the script, not in the output folder.
-# This avoids UNC/network share write issues when -OutputPath is a remote path.
-$logFile    = Join-Path $outputDir ("WIMServicing_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmm"))
+# Reconcile the early diagnostic log with the final output directory. This is
+# important for interactive runs where the output path can be changed later.
+$finalLogFile = Join-Path $outputDir ("WIMServicing_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmm"))
+if ($logFile -ne $finalLogFile -and (Test-Path -LiteralPath $logFile)) {
+    try {
+        Move-Item -LiteralPath $logFile -Destination $finalLogFile -Force -ErrorAction Stop
+    } catch {
+        # Keep the early log if the final location cannot be written.
+        Write-Host "  [!] Could not move early log to final output folder: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+$logFile = $finalLogFile
 
 @($workRoot, $mountDir, $scratchDir) | ForEach-Object {
     if (-not (Test-Path $_)) { New-Item $_ -ItemType Directory -Force | Out-Null }
 }
 
-function Write-Log {
-    param([string]$msg, [string]$level = "INFO")
-    # Use File::AppendAllText instead of Add-Content - handles UNC paths reliably
-    [System.IO.File]::AppendAllText($logFile, ("[{0}] [{1}] {2}`r`n" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $level, $msg))
-}
-
-Write-Log "=== WIM Wizard v$ScriptVersion ==="
+Write-Log "Output path resolved: $OutputPath"
 
 # Load custom Appx list from XML - must be here, after Write-Log is defined
 if (($AppxListPath -is [string]) -and ($AppxListPath.Length -gt 0) -and (Test-Path -LiteralPath $AppxListPath)) {
