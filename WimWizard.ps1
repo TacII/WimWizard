@@ -64,6 +64,23 @@
     Languages and OS version are read directly from the WIM.
     Use this for monthly patch cycles after the initial image build.
 
+.PARAMETER DriverPackageID
+    MECM/Configuration Manager Driver Package ID. Requires -SCCMServer,
+    -SCCMSiteCode and an installed Configuration Manager console.
+
+.PARAMETER DriverPath
+    Local or UNC directory containing unpacked INF-based Windows drivers.
+    The directory is searched recursively.
+
+.PARAMETER DriverFilter
+    Driver selection for install.wim: All or StorageAndNetwork.
+
+.PARAMETER AddStorageDriversToWinRE
+    Also integrate selected storage drivers into the install.wim-contained winre.wim.
+
+.PARAMETER AddNetworkDriversToWinRE
+    Also integrate selected network drivers into the install.wim-contained winre.wim.
+
 .PARAMETER Languages
     Comma-separated 2-letter country codes for language packs to inject.
     Example: "se,no,dk,fi"
@@ -160,12 +177,15 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.2.2
+    Version     : 5.3.0
     Date        : 2026-05-12
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.3.0  New: Driver integration from MECM Driver Packages or local/UNC paths.
+           INF metadata parsing, Storage/Network filtering, install.wim and
+           winre.wim integration, PatchExistingWim support, and validation.
     5.2.2  Fix: Invoke-SCCMImport now moves the finished WIM to
            $SCCMPackagePath before calling the CM cmdlet. Previously the WIM
            was left in the local output folder causing a "Not found"
@@ -318,6 +338,12 @@ param(
     [switch]$X64,                         # Build x64 image (default when neither switch set)
     [switch]$ARM64,                        # Build ARM64 image
     [string]$FoDList = "",                 # Comma-separated FoD keys to enable (e.g. "NetFx3,RsatAD")
+    [string]$DriverPackageID = "",         # MECM Driver Package ID
+    [string]$DriverPath = "",              # Local or UNC folder containing INF drivers
+    [ValidateSet("All", "StorageAndNetwork")]
+    [string]$DriverFilter = "All",
+    [switch]$AddStorageDriversToWinRE,
+    [switch]$AddNetworkDriversToWinRE,
     [switch]$Unattended,
     [switch]$DebugBuild,                   # Extra diagnostics: show full DISM output, dump pending packages before cleanup
     # SCCM import
@@ -334,7 +360,16 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.2.2"
+$ScriptVersion = "5.3.0"
+
+$ScriptRoot = $PSScriptRoot
+if (-not $ScriptRoot) { $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$DriverHelperPath = Join-Path $ScriptRoot "WimWizard-Drivers.ps1"
+if (-not (Test-Path -LiteralPath $DriverHelperPath -PathType Leaf)) {
+    Write-Host "  [ERR] Shared driver helper not found: $DriverHelperPath" -ForegroundColor Red
+    exit 1
+}
+. $DriverHelperPath
 
 # Validate architecture selection
 if ($X64 -and $ARM64) {
@@ -345,23 +380,31 @@ if ($X64 -and $ARM64) {
 }
 $Architecture = if ($ARM64) { "arm64" } else { "x64" }
 
-# Validate SCCM parameters when -SCCMImport is specified
-if ($SCCMImport) {
+# Driver source validation must happen before any image is mounted.
+try {
+    $DriverParameterState = Assert-DriverSourceParameters -DriverPackageID $DriverPackageID -DriverPath $DriverPath -AddStorageDriversToWinRE:$AddStorageDriversToWinRE -AddNetworkDriversToWinRE:$AddNetworkDriversToWinRE
+} catch {
+    Write-Host "  [ERR] $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
+$NeedsConfigurationManager = $SCCMImport -or -not [string]::IsNullOrWhiteSpace($DriverPackageID)
+if ($NeedsConfigurationManager) {
     $sccmMissing = @()
-    if (-not $SCCMServer)      { $sccmMissing += "-SCCMServer" }
-    if (-not $SCCMSiteCode)    { $sccmMissing += "-SCCMSiteCode" }
-    if (-not $SCCMPackagePath) { $sccmMissing += "-SCCMPackagePath" }
-    if (-not $SCCMPackageName) { $sccmMissing += "-SCCMPackageName" }
+    if (-not $SCCMServer -and ($SCCMImport -or $DriverPackageID)) { $sccmMissing += "-SCCMServer" }
+    if (-not $SCCMSiteCode -and ($SCCMImport -or $DriverPackageID)) { $sccmMissing += "-SCCMSiteCode" }
+    if ($SCCMImport -and -not $SCCMPackagePath) { $sccmMissing += "-SCCMPackagePath" }
+    if ($SCCMImport -and -not $SCCMPackageName) { $sccmMissing += "-SCCMPackageName" }
     if ($sccmMissing) {
         Write-Host ""
-        Write-Host "  [ERR] -SCCMImport requires: $($sccmMissing -join ', ')" -ForegroundColor Red
+        Write-Host "  [ERR] Configuration Manager parameters missing: $($sccmMissing -join ', ')" -ForegroundColor Red
         Write-Host "        Run .\WimWizard.ps1 -Help for SCCM usage examples." -ForegroundColor Red
         Write-Host ""
         exit 1
     }
     if (-not $env:SMS_ADMIN_UI_PATH) {
         Write-Host ""
-        Write-Host "  [ERR] -SCCMImport requires the SCCM/MECM console to be installed on this machine." -ForegroundColor Red
+        Write-Host "  [ERR] MECM/Configuration Manager console is required for the selected operation." -ForegroundColor Red
         Write-Host "        Environment variable SMS_ADMIN_UI_PATH not found." -ForegroundColor Red
         Write-Host ""
         exit 1
@@ -431,6 +474,11 @@ if ($Help) {
     Write-Host "  -ARM64                     Build ARM64 image (mutually exclusive with -X64)"
     Write-Host "  -FoDList          <keys>   Features on Demand: NetFx3,RsatAD,RsatGPO,RsatSrvMgr"
     Write-Host "                             ARM64 note: only NetFx3 is supported; RSAT keys are silently skipped"
+    Write-Host "  -DriverPackageID  <id>     MECM Driver Package ID (requires server/site code)"
+    Write-Host "  -DriverPath       <path>   Local or UNC folder with unpacked INF-based drivers"
+    Write-Host "  -DriverFilter     <value>  All (default) or StorageAndNetwork"
+    Write-Host "  -AddStorageDriversToWinRE  Also integrate Storage drivers into winre.wim"
+    Write-Host "  -AddNetworkDriversToWinRE  Also integrate Network drivers into winre.wim"
     Write-Host "  -SkipUpdates               Do not download or apply updates"
     Write-Host "  -SkipLanguagePacks         Skip language pack and FOD injection"
     Write-Host "  -SkipAppxRemoval           Skip removal of provisioned Appx packages"
@@ -468,16 +516,18 @@ if ($Help) {
     Write-Host "        The account running the script needs SCCM Full Administrator rights."
     Write-Host "        -SCCMPackagePath must be a UNC path accessible by the SCCM computer account."
     Write-Host ""
+    Write-Host "  DRIVER EXAMPLES" -ForegroundColor White
+    Write-Host "  ---------------"
+    Write-Host "  .\WimWizard.ps1 -DriverPackageID `"ABC00123`" -SCCMServer `"mecm01.contoso.local`" -SCCMSiteCode `"ABC`" -DriverFilter All -Unattended"
+    Write-Host "  .\WimWizard.ps1 -DriverPackageID `"ABC00123`" -SCCMServer `"mecm01.contoso.local`" -SCCMSiteCode `"ABC`" -DriverFilter StorageAndNetwork -AddStorageDriversToWinRE -Unattended"
+    Write-Host "  .\WimWizard.ps1 -DriverPath `"\\fileserver\Drivers\Dell\Latitude-5550`" -DriverFilter All -Unattended"
+    Write-Host "  .\WimWizard.ps1 -PatchExistingWim `"D:\Images\Windows11.wim`" -DriverPath `"D:\Drivers\Latitude-5550`" -DriverFilter StorageAndNetwork -AddStorageDriversToWinRE -AddNetworkDriversToWinRE -SkipUpdates -Unattended"
+    Write-Host ""
     exit 0
 }
 
 # Derive base folder from wherever this script lives.
 # All default paths (ISO-Source, Updates, Output) are relative to this.
-$ScriptRoot = $PSScriptRoot
-if (-not $ScriptRoot) {
-    # Fallback if run dot-sourced or from ISE without a saved path
-    $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-}
 Write-Verbose "Script root: $ScriptRoot"
 
 # Apply defaults that depend on $ScriptRoot (cannot be set in param() block)
@@ -1857,6 +1907,63 @@ Write-OK "Output: $OutputPath"
 
 #endregion
 
+#region ── Driver source validation and discovery ─────────────────────────────
+
+$DriverSourceInfo = $null
+$DriverMetadata = @()
+$DriverSelection = $null
+$DriverWinRESelection = @()
+
+if (-not [string]::IsNullOrWhiteSpace($DriverPackageID) -or -not [string]::IsNullOrWhiteSpace($DriverPath)) {
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($DriverPackageID)) {
+            $DriverSourceInfo = Resolve-CMDriverPackageSource `
+                -DriverPackageID $DriverPackageID `
+                -SCCMServer $SCCMServer `
+                -SCCMSiteCode $SCCMSiteCode `
+                -ModulePath $Script:SCCMModulePath `
+                -LogAction { param($message, $level) Write-Info $message }
+        } else {
+            if (-not (Test-Path -LiteralPath $DriverPath)) {
+                if ($DriverPath -match '^[A-Za-z]:\\' -and -not (Test-Path -LiteralPath $DriverPath.Substring(0, 2))) {
+                    throw "Driver path '$DriverPath' is not available. The mapped drive may not be present in this elevated session; use a UNC path or make the drive available to the administrator session."
+                }
+                throw "Driver path not found: $DriverPath"
+            }
+            if (-not (Test-Path -LiteralPath $DriverPath -PathType Container)) {
+                throw "Driver source must be a directory: $DriverPath"
+            }
+            $DriverSourceInfo = [pscustomobject]@{
+                SourceType = 'Path'; PackageName = ''; PackageID = ''; SourcePath = $DriverPath; Package = $null
+            }
+            Write-Info "Driver source path: $DriverPath"
+        }
+
+        $driverFiles = @(Find-DriverInfFiles -Path $DriverSourceInfo.SourcePath -LogAction { param($message, $level) Write-Info $message })
+        if ($driverFiles.Count -eq 0) { throw "Driver source contains no INF files: $($DriverSourceInfo.SourcePath)" }
+        $DriverMetadata = @($driverFiles | ForEach-Object {
+            Get-DriverInfMetadata -Path $_.FullName -LogAction { param($message, $level) Write-Warn $message }
+        })
+        $DriverSelection = Select-DriverInfFiles -Metadata $DriverMetadata -DriverFilter $DriverFilter -LogAction { param($message, $level) Write-Info $message }
+        if ($DriverSelection.Selected.Count -eq 0) {
+            throw "DriverFilter '$DriverFilter' selected no matching drivers from '$($DriverSourceInfo.SourcePath)'."
+        }
+        if ($AddStorageDriversToWinRE) { $DriverWinRESelection += @($DriverMetadata | Where-Object { $_.Category -eq 'Storage' }) }
+        if ($AddNetworkDriversToWinRE) { $DriverWinRESelection += @($DriverMetadata | Where-Object { $_.Category -eq 'Network' }) }
+        if (($AddStorageDriversToWinRE -and @($DriverMetadata | Where-Object { $_.Category -eq 'Storage' }).Count -eq 0) -or
+            ($AddNetworkDriversToWinRE -and @($DriverMetadata | Where-Object { $_.Category -eq 'Network' }).Count -eq 0)) {
+            throw 'One or more requested WinRE driver categories have no matching INF files in the selected source.'
+        }
+        Write-OK "Driver discovery complete: $($DriverSelection.Selected.Count) selected of $($DriverMetadata.Count) INF file(s)"
+    } catch {
+        Write-Fail $_.Exception.Message
+        Dismount-AllISOs
+        exit 1
+    }
+}
+
+#endregion
+
 #region ── Summary and confirmation ───────────────────────────────────────────
 
 Write-Section "Summary"
@@ -1890,6 +1997,22 @@ if (-not $SkipUpdates -and $resolvedUpdatePath) {
 
 if ($FoDList -ne "") {
     Write-Host "    Features (FoD): $FoDList" -ForegroundColor Cyan
+}
+
+if ($DriverSourceInfo) {
+    Write-Host "    Driver source  : $($DriverSourceInfo.SourceType)" -ForegroundColor Cyan
+    if ($DriverSourceInfo.PackageID) {
+        Write-Host "    Driver package : $($DriverSourceInfo.PackageName) [$($DriverSourceInfo.PackageID)]" -ForegroundColor Cyan
+    }
+    Write-Host "    Driver path    : $($DriverSourceInfo.SourcePath)" -ForegroundColor Cyan
+    Write-Host "    Driver filter  : $DriverFilter" -ForegroundColor Cyan
+    Write-Host "    INF files      : found $($DriverMetadata.Count), selected $($DriverSelection.Selected.Count)" -ForegroundColor Cyan
+    Write-Host "    Selected       : Storage $(@($DriverSelection.Storage).Count), Network $(@($DriverSelection.Network).Count), Other $(@($DriverSelection.Other).Count), Unknown $(@($DriverSelection.Unknown).Count)" -ForegroundColor Cyan
+    Write-Host "    install.wim    : $($DriverSelection.Selected.Count) driver(s)" -ForegroundColor Cyan
+    Write-Host "    WinRE Storage   : $(if ($AddStorageDriversToWinRE) { 'Yes' } else { 'No' })" -ForegroundColor Cyan
+    Write-Host "    WinRE Network   : $(if ($AddNetworkDriversToWinRE) { 'Yes' } else { 'No' })" -ForegroundColor Cyan
+} else {
+    Write-Host "    Driver source  : None (driver integration unchanged/disabled)" -ForegroundColor DarkGray
 }
 
 Write-Host "    Output        : $OutputPath" -ForegroundColor Cyan
@@ -1978,8 +2101,18 @@ if ($SkipAppxRemoval)  { $_cmdParts += "-SkipAppxRemoval" }
 if ($ARM64)            { $_cmdParts += "-ARM64" } elseif ($X64) { $_cmdParts += "-X64" }
 if ($Unattended)       { $_cmdParts += "-Unattended" }
 if ($DebugBuild)       { $_cmdParts += "-DebugBuild" }
+if ($DriverPackageID)  { $_cmdParts += "-DriverPackageID `"$DriverPackageID`""; if ($SCCMServer) { $_cmdParts += "-SCCMServer `"$SCCMServer`"" }; if ($SCCMSiteCode) { $_cmdParts += "-SCCMSiteCode `"$SCCMSiteCode`"" } }
+if ($DriverPath)       { $_cmdParts += "-DriverPath `"$DriverPath`"" }
+if ($DriverSourceInfo) { $_cmdParts += "-DriverFilter $DriverFilter" }
+if ($AddStorageDriversToWinRE) { $_cmdParts += "-AddStorageDriversToWinRE" }
+if ($AddNetworkDriversToWinRE) { $_cmdParts += "-AddNetworkDriversToWinRE" }
 Write-Log ($_cmdParts -join " ")
 Write-Log "Source: $SourceFolder  WIM: $wimFile  Index: $WimIndex  Edition: $($chosenImage.ImageName)"
+if ($DriverSourceInfo) {
+    Write-Log "Driver source: $($DriverSourceInfo.SourceType)  Package: $($DriverSourceInfo.PackageName) [$($DriverSourceInfo.PackageID)]  Path: $($DriverSourceInfo.SourcePath)"
+    Write-Log "Driver filter: $DriverFilter  INF found: $($DriverMetadata.Count)  selected: $($DriverSelection.Selected.Count)  Storage: $(@($DriverSelection.Storage).Count)  Network: $(@($DriverSelection.Network).Count)  Other: $(@($DriverSelection.Other).Count)  Unknown: $(@($DriverSelection.Unknown).Count)"
+    Write-Log "WinRE driver targets: Storage=$($AddStorageDriversToWinRE.IsPresent), Network=$($AddNetworkDriversToWinRE.IsPresent)"
+}
 
 #endregion
 
@@ -2041,9 +2174,15 @@ try {
     # ═══════════════════════════════════════════════════════════════════════════
 
     $dotNetFiles = @()
-    if (-not $SkipUpdates -and $resolvedUpdatePath) {
+    $allUpdateFiles = @()
+    $safeOSFiles = @()
+    $lcuFile = $null
+    $checkpointFile = $null
+    $lcuAllFiles = @()
 
-        # Enumerate update files
+    if (-not $SkipUpdates -and $resolvedUpdatePath) {
+        # Enumerate update files once. WinRE servicing is independent from the
+        # install.wim update block so driver-only WinRE servicing also works.
         $allUpdateFiles = @(
             Get-ChildItem $resolvedUpdatePath -Filter "*.msu" -ErrorAction SilentlyContinue
             Get-ChildItem $resolvedUpdatePath -Filter "*.cab" -ErrorAction SilentlyContinue
@@ -2073,130 +2212,29 @@ try {
 
         # All LCU-related MSUs (LCU + checkpoint) for passing to DISM temp folder
         $lcuAllFiles = @($lcuFile) + @($checkpointFile) | Where-Object { $_ }
+    }
 
-        # ── PART 1: Patch WinRE ────────────────────────────────────────────────
-        # Per Microsoft docs: WinRE is patched FIRST, before install.wim.
-        # Sequence: SSU via LCU → SafeOS → Cleanup /ResetBase /Defer → Export
+    $winreNeedsServicing = Test-WinREServicingRequired -LcuFile $lcuFile -SafeOSFiles $safeOSFiles -DriverInfFiles $DriverWinRESelection
+    if ($winreNeedsServicing) {
+        Write-Section "Patching WinRE (winre.wim) [step 1 of pipeline]"
+        $winreLog = { param($message, $level) Write-Log $message $level }
+        Invoke-WinREDriverAndUpdateServicing `
+            -InstallMountPath $mountDir `
+            -WorkRoot $workRoot `
+            -ScratchDirectory $scratchDir `
+            -LcuFile $lcuFile `
+            -LcuAllFiles $lcuAllFiles `
+            -SafeOSFiles $safeOSFiles `
+            -DriverInfFiles $DriverWinRESelection `
+            -DriverFoundCount $DriverMetadata.Count `
+            -DriverSkippedCount ($DriverMetadata.Count - @($DriverWinRESelection).Count) `
+            -LogAction $winreLog
+        Write-OK "WinRE processing complete"
+    } else {
+        Write-Info "No WinRE updates or requested WinRE drivers - skipping WinRE processing"
+    }
 
-        if ($lcuFile -or $safeOSFiles) {
-            Write-Section "Patching WinRE (winre.wim) [step 1 of pipeline]"
-
-            $winreSource   = "$mountDir\Windows\System32\Recovery\winre.wim"
-            $winreWork     = Join-Path $workRoot "winre_work.wim"
-            $winreExport   = Join-Path $workRoot "winre_export.wim"
-            $winreMountDir = Join-Path $workRoot "WinREMount"
-
-            if (-not (Test-Path $winreSource)) {
-                Write-Warn "winre.wim not found in mounted image - skipping WinRE patching"
-                Write-Log "WARN: winre.wim not found" "WARN"
-            } else {
-                New-Item $winreMountDir -ItemType Directory -Force | Out-Null
-                Copy-Item $winreSource $winreWork -Force
-                Set-ItemProperty $winreWork -Name IsReadOnly -Value $false
-                Write-OK "Copied winre.wim to working location"
-                Write-Log "winre.wim copied: $winreWork"
-
-                Mount-WindowsImage -ImagePath $winreWork -Index 1 -Path $winreMountDir
-                Write-OK "winre.wim mounted at: $winreMountDir"
-                Write-Log "winre.wim mounted"
-
-                try {
-                    # Step 1: SSU via LCU
-                    # Per Microsoft: ignore 0x8007007e (known issue with combined CU)
-                    if ($lcuFile) {
-                        # Copy LCU + checkpoint to isolated temp folder - both needed, original filenames preserved
-                        $winreLCUTemp = Join-Path $workRoot "LCU_winre_temp"
-                        New-Item $winreLCUTemp -ItemType Directory -Force | Out-Null
-                        foreach ($f in $lcuAllFiles) { Copy-Item $f.FullName $winreLCUTemp }
-                        $winreLCUTarget = Join-Path $winreLCUTemp $lcuFile.Name
-
-                        Write-Host "  >> SSU -> WinRE: $($lcuFile.Name)" -ForegroundColor White
-                        Write-Info "     Applying SSU to WinRE - may take several minutes..."
-                        try {
-                            Add-WindowsPackage -PackagePath $winreLCUTarget -Path $winreMountDir -ScratchDirectory $scratchDir | Out-Null
-                            Write-OK "SSU applied to WinRE"
-                            Write-Log "WinRE SSU OK: $($lcuFile.Name)"
-                        } catch {
-                            $err = $_.Exception.Message
-                            if ($err -match "0x8007007e") {
-                                Write-Info "SSU: 0x8007007e - known issue with combined CU, ignoring per Microsoft docs"
-                                Write-Log "WinRE SSU 0x8007007e - ignored (known issue)" "INFO"
-                            } elseif ($err -match "0x800f081e") {
-                                Write-Info "SSU already current in WinRE (0x800f081e) - skipping"
-                                Write-Log "WinRE SSU not applicable (already current)" "INFO"
-                            } else {
-                                throw "SSU failed on WinRE: $err"
-                            }
-                        }
-                        Remove-Item $winreLCUTemp -Recurse -Force -ErrorAction SilentlyContinue
-                    }
-
-                    # Step 6: SafeOS Dynamic Update
-                    foreach ($safeOS in $safeOSFiles) {
-                        Write-Host "  >> SafeOS -> WinRE: $($safeOS.Name)" -ForegroundColor White
-                        try {
-                            Add-WindowsPackage -PackagePath $safeOS.FullName -Path $winreMountDir -ScratchDirectory $scratchDir -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
-                            Write-OK "SafeOS Dynamic Update applied to WinRE"
-                            Write-Log "WinRE SafeOS OK: $($safeOS.Name)"
-                        } catch {
-                            $err = $_.Exception.Message
-                            if ($err -match "0x800f081e") {
-                                Write-Info "SafeOS not applicable (already current) - skipping"
-                                Write-Log "WinRE SafeOS 0x800f081e - skipped" "INFO"
-                            } else {
-                                Write-Warn "SafeOS failed: $err"
-                                Write-Log "WARN WinRE SafeOS: $err" "WARN"
-                            }
-                        }
-                    }
-
-                    # Step 7: Cleanup /ResetBase /Defer
-                    Write-Info "Cleaning up WinRE image (/ResetBase /Defer)..."
-                    & dism /Image:$winreMountDir /Cleanup-Image /StartComponentCleanup /ResetBase /Defer | Out-Null
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-OK "WinRE cleanup OK"
-                        Write-Log "WinRE cleanup OK"
-                    } else {
-                        Write-Warn "WinRE cleanup exit $LASTEXITCODE (non-fatal, continuing)"
-                        Write-Log "WARN: WinRE cleanup exit $LASTEXITCODE" "WARN"
-                    }
-
-                    # Dismount + save
-                    Dismount-WindowsImage -Path $winreMountDir -Save
-                    Write-OK "winre.wim saved"
-                    Write-Log "winre.wim dismounted (Save)"
-
-                } catch {
-                    Write-Warn "Error patching WinRE: $($_.Exception.Message)"
-                    Write-Warn "Discarding WinRE changes - main OS is not affected"
-                    Write-Log "WARN: WinRE patch failed: $($_.Exception.Message)" "WARN"
-                    try { Dismount-WindowsImage -Path $winreMountDir -Discard -ErrorAction SilentlyContinue } catch {}
-                }
-
-                # Step 8: Export winre.wim
-                if (-not (Get-WindowsImage -Mounted | Where-Object { $_.Path -eq $winreMountDir })) {
-                    Write-Info "Exporting winre.wim (reduces size)..."
-                    Export-WindowsImage -SourceImagePath $winreWork -SourceIndex 1 `
-                        -DestinationImagePath $winreExport -CompressionType maximum
-                    Write-OK "winre.wim exported"
-                    Write-Log "winre.wim exported: $winreExport"
-
-                    # Copy patched winre.wim back into mounted install.wim
-                    Set-ItemProperty $winreSource -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
-                    Copy-Item $winreExport $winreSource -Force
-                    Write-OK "Patched winre.wim written back into install.wim"
-                    Write-Log "winre.wim written back to: $winreSource"
-
-                    Remove-Item $winreWork   -Force -ErrorAction SilentlyContinue
-                    Remove-Item $winreExport -Force -ErrorAction SilentlyContinue
-                }
-
-                Remove-Item $winreMountDir -Recurse -Force -ErrorAction SilentlyContinue
-            }
-        } else {
-            Write-Info "No LCU or SafeOS files found - skipping WinRE patching"
-        }
-
+    if (-not $SkipUpdates -and $resolvedUpdatePath) {
         # ── PART 2: Patch install.wim ──────────────────────────────────────────
         # Per Microsoft docs sequence for install.wim:
         #   Step 9:  SSU via LCU
@@ -2450,7 +2488,23 @@ try {
             }
         }
 
-    } # end if (-not $SkipUpdates)
+    } # end if (-not $SkipUpdates -and $resolvedUpdatePath)
+
+    # Driver integration happens after the Microsoft update/LP/FoD sequence and
+    # before Appx changes, final dismount and WIM export.
+    if ($DriverSourceInfo) {
+        Write-Section "Integrating drivers into install.wim"
+        $driverLog = { param($message, $level) Write-Log $message $level }
+        $installDriverResult = Add-DriversToOfflineImage `
+            -MountPath $mountDir `
+            -DriverInfFiles $DriverSelection.Selected `
+            -TargetLabel 'install.wim' `
+            -FoundCount $DriverMetadata.Count `
+            -SkippedCount $DriverSelection.Skipped.Count `
+            -LogAction $driverLog `
+            -ThrowOnFailure
+        Write-OK "install.wim driver integration complete: $($installDriverResult.SuccessCount) successful"
+    }
 
     # Appx removal
     if (-not $SkipAppxRemoval) {
