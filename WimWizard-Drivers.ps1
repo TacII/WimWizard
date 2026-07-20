@@ -151,12 +151,12 @@ function Get-DriverInfMetadata {
         foreach ($line in ($text -split "`r?`n")) {
             $trimmed = $line.Trim()
             if (-not $trimmed -or $trimmed.StartsWith(';')) { continue }
-            if ($trimmed -match '^s*\[([^]]+)\]') {
+            if ($trimmed -match '^\s*\[([^]]+)\]') {
                 $inVersion = $Matches[1].Trim() -ieq 'Version'
                 if ($inVersion) { $versionFound = $true }
                 continue
             }
-            if (-not $inVersion -or $trimmed -notmatch '^s*(ClassGuid|Class|Provider|DriverVer)\s*=\s*(.*?)\s*$') {
+            if (-not $inVersion -or $trimmed -notmatch '^\s*(ClassGuid|Class|Provider|DriverVer)\s*=\s*(.*?)\s*$') {
                 continue
             }
             $key = $Matches[1]
@@ -296,22 +296,47 @@ function Resolve-CMDriverPackageSource {
         }
         Push-Location "$siteDrive`:" -ErrorAction Stop
         $locationPushed = $true
-        $package = Get-CMDriverPackage -Id $DriverPackageID -ErrorAction Stop
+        # Do not use -Fast here: PkgSourcePath is a lazy property on some
+        # Configuration Manager versions. The cmdlet warns when -Fast is not
+        # used, but full properties are intentional for package resolution.
+        $package = Get-CMDriverPackage -Id $DriverPackageID -WarningAction SilentlyContinue -ErrorAction Stop
         if (-not $package) { throw "MECM Driver Package '$DriverPackageID' was not found." }
 
         $typeProperty = $package.PSObject.Properties['PackageType']
-        if ($typeProperty -and [string]$package.PackageType -and [string]$package.PackageType -notmatch 'driver') {
-            throw "MECM object '$DriverPackageID' is not a Driver Package (type: $($package.PackageType))."
+        if ($typeProperty -and [string]$package.PackageType) {
+            $packageTypeText = [string]$package.PackageType
+            $packageTypeNumber = 0
+            $isNumericPackageType = [int]::TryParse($packageTypeText, [ref]$packageTypeNumber)
+            # SMS_PackageBaseClass uses PackageType 3 for Driver Packages.
+            $isDriverPackage = ($packageTypeText -match 'driver') -or
+                               ($isNumericPackageType -and $packageTypeNumber -eq 3)
+            if (-not $isDriverPackage) {
+                throw "MECM object '$DriverPackageID' is not a Driver Package (type: $($package.PackageType))."
+            }
         }
         $sourcePath = [string]$package.PkgSourcePath
         if ([string]::IsNullOrWhiteSpace($sourcePath)) { throw "Driver Package '$DriverPackageID' has no PkgSourcePath." }
-        if (-not (Test-Path -LiteralPath $sourcePath)) { throw "PkgSourcePath is not reachable from this build host: $sourcePath" }
-        if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) { throw "PkgSourcePath is not a directory: $sourcePath" }
 
-        Invoke-DriverLog $LogAction "MECM Driver Package: $($package.Name) [$DriverPackageID]" 'INFO'
+        # Validate the source through the normal FileSystem provider. The
+        # package was retrieved from the CMSite provider above; validating an
+        # UNC path while that provider is still current can hide the actual
+        # SMB/access error on some Configuration Manager console versions.
+        $packageName = [string]$package.Name
+        if ($locationPushed) {
+            Pop-Location -ErrorAction Stop
+            $locationPushed = $false
+        }
+        try {
+            $sourceItem = Get-Item -LiteralPath $sourcePath -ErrorAction Stop
+        } catch {
+            throw "PkgSourcePath is not reachable from this build host: $sourcePath ($($_.Exception.Message))"
+        }
+        if (-not $sourceItem.PSIsContainer) { throw "PkgSourcePath is not a directory: $sourcePath" }
+
+        Invoke-DriverLog $LogAction "MECM Driver Package: $packageName [$DriverPackageID]" 'INFO'
         Invoke-DriverLog $LogAction "Resolved driver source path: $sourcePath" 'INFO'
         return [pscustomobject]@{
-            SourceType = 'MECM Driver Package'; PackageName = [string]$package.Name
+            SourceType = 'MECM Driver Package'; PackageName = $packageName
             PackageID = $DriverPackageID; SourcePath = $sourcePath; Package = $package
         }
     } finally {

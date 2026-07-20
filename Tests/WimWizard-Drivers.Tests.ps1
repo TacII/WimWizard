@@ -124,6 +124,13 @@ Describe 'WimWizard MECM driver package resolution' {
         Should -Invoke Get-CMDriverPackage -Times 1
         (Get-Location).Path | Should -Be $before
     }
+
+    It 'recognizes numeric Configuration Manager PackageType 3 as a Driver Package' {
+        Mock Get-CMDriverPackage { [pscustomobject]@{ Name='Numeric Driver Package'; PackageID='ABC00123'; PackageType=3; PkgSourcePath=$TestDrive } }
+        $resolved = Resolve-CMDriverPackageSource -DriverPackageID 'ABC00123' -SCCMServer 'mecm01' -SCCMSiteCode 'ABC' -ModulePath $modulePath
+        $resolved.SourceType | Should -Be 'MECM Driver Package'
+        $resolved.PackageName | Should -Be 'Numeric Driver Package'
+    }
     It 'fails cleanly when PkgSourcePath is not reachable' {
         Mock Get-CMDriverPackage { [pscustomobject]@{ Name='Broken'; PackageType='Driver Package'; PkgSourcePath=(Join-Path $TestDrive 'does-not-exist') } }
         { Resolve-CMDriverPackageSource -DriverPackageID 'ABC00123' -SCCMServer 'mecm01' -SCCMSiteCode 'ABC' -ModulePath $modulePath } | Should -Throw
