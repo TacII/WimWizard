@@ -1,4 +1,4 @@
-﻿#Requires -RunAsAdministrator
+#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     WIM Wizard - Windows 11 Image Servicing Tool for SCCM/MECM
@@ -152,6 +152,15 @@
     DP replication runs asynchronously in SCCM - this parameter only
     initiates the job and does not wait for completion.
 
+.PARAMETER SCCMDPGroup
+    Name of a distribution point group to add the package to, via
+    Start-CMContentDistribution. Independent of -SCCMUpdateDPs: that
+    parameter only refreshes content on DPs/groups already assigned to
+    the package, while this one establishes membership in a group for
+    the first time (e.g. to stage a new build to one group before a
+    wider rollout). Safe to re-run; if the package is already a member
+    of the group, the attempt is skipped rather than treated as an error.
+
 .PARAMETER Unattended
     Answers yes to all prompts and uses defaults for all path inputs.
     Suitable for scheduled tasks and automation pipelines.
@@ -160,12 +169,69 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.2.2
-    Date        : 2026-05-12
+    Version     : 5.2.6
+    Date        : 2026-06-25
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.2.6  New: Add-SCCMPackageToDPGroup now verifies the source WIM is
+           "stable" (exists, non-zero size, unchanged across two reads a few
+           seconds apart) via new Test-SCCMSourceStable before calling
+           Start-CMContentDistribution. Addresses an observed real-world race
+           where Distribution Manager's first attempt failed with "failed to
+           access the source directory" immediately after a build, while the
+           file was visibly present moments later - most likely DFS-R
+           replication lag or a lingering file handle right after the copy.
+           SCCM's own 30-minute automatic retry already self-heals this, so
+           the check is advisory and bounded (waits up to ~9-12s, then
+           proceeds regardless and lets SCCM's retry handle it if still
+           unstable) rather than blocking indefinitely.
+    5.2.5  New: -SCCMDPGroup parameter adds the package to a distribution point
+           group via Start-CMContentDistribution, independent of -SCCMUpdateDPs
+           (which only refreshes content on DPs/groups already assigned to the
+           package). Lets a build be staged to one DP group before a wider
+           rollout. "Already distributed" errors from Start-CMContentDistribution
+           are treated as a benign no-op so repeated monthly runs against the
+           same package ID stay quiet. Failures are non-fatal (warning only),
+           matching the existing -SCCMUpdateDPs error handling. Final summary
+           banner and -Help output updated accordingly.
+    5.2.4  Fix: Invoke-AutoUpdateDownload now removes any other LCU .msu for the
+           target architecture immediately after a new LCU finishes downloading.
+           Previously an older KB's LCU could remain on disk alongside the new
+           one until the next run's Invoke-UpdateFolderCleanup pass. The $lcuFile
+           selector (line ~2090) picks by alphabetical Sort-Object Name, not by
+           KB number or date - with two LCUs present for the same arch it
+           silently selected the lower KB (older patch), since e.g.
+           "kb5083482" sorts before "kb5083769".
+           NOTE: this is NOT the same gap that 5.1.7's superseded-file removal
+           covers. That logic only matches the canonical "<n>_<Label>_KB<n>_<arch>"
+           naming scheme (e.g. 1_LCU_KB5083769_x64.msu) via $canonicalPattern.
+           Real LCU files keep Microsoft's original filename with the SHA1 hash
+           (windows11.0-kb5083769-x64_<hash>.msu) and are never renamed to the
+           canonical scheme, so they never matched $canonicalPattern and were
+           invisible to that dedup pass. Two correctly hash-named LCUs for
+           different KBs could coexist indefinitely with no cleanup ever
+           catching it. The selector itself (line ~2090) is unchanged; this
+           closes the window in which it could ever see more than one LCU
+           candidate. Checkpoint (kb5043080) is explicitly excluded from
+           removal.
+    5.2.3  Fix: Get-CatalogSearchTerms 26H2 build boundary corrected from the
+           placeholder 27000 to 26300. Builds 26300-26999 previously fell
+           through to the default case and were silently mislabeled "25H2"
+           (wrong Catalog search terms, wrong SafeOSVersion propagated into
+           the auto-generated filename and SCCM package version field).
+           Confirmed via Microsoft Insider blog: build 26300.8697 (Experimental
+           channel, 2026-06-19) is the first build to report version 26H2,
+           delivered as an enablement package on the 25H2 servicing branch.
+           BuildFilter (used for LCU/SafeOS title matching) was unaffected -
+           it derives from $build directly, not from the mislabeled version
+           string. NOTE: 26300 confirmed only against an Insider/Experimental
+           build; not yet verified against a public/Enterprise GA 26H2 ISO.
+           TODO: SafeOS combined-title logic (24H2+25H2 share one Catalog
+           entry) may need a similar 25H2+26H2 entry once 26H2 LCU/SafeOS
+           updates exist in the public Catalog - no confirmed title string
+           yet, do not guess it when that day comes.
     5.2.2  Fix: Invoke-SCCMImport now moves the finished WIM to
            $SCCMPackagePath before calling the CM cmdlet. Previously the WIM
            was left in the local output folder causing a "Not found"
@@ -329,12 +395,13 @@ param(
     [string]$SCCMVersion       = "",       # Version string written to the package, e.g. "25H2"
     [string]$SCCMComment       = "",       # Optional description / comment for the package
     [string]$SCCMPackageID     = "",       # If set: update this existing package instead of creating new
-    [switch]$SCCMUpdateDPs                 # Trigger DP update after import/update
+    [switch]$SCCMUpdateDPs,                # Trigger DP update after import/update
+    [string]$SCCMDPGroup       = ""        # Distribution point group to add the package to (Start-CMContentDistribution); independent of -SCCMUpdateDPs
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.2.2"
+$ScriptVersion = "5.2.6"
 
 # Validate architecture selection
 if ($X64 -and $ARM64) {
@@ -445,6 +512,7 @@ if ($Help) {
     Write-Host "  -SCCMComment      <text>   Optional comment/description for the package"
     Write-Host "  -SCCMPackageID    <id>     Update existing package (e.g. FC100042) instead of creating new"
     Write-Host "  -SCCMUpdateDPs             Trigger DP update after import"
+    Write-Host "  -SCCMDPGroup      <name>   Add package to this distribution point group (independent of -SCCMUpdateDPs)"
     Write-Host "  -Help                      Show this help"
     Write-Host ""
     Write-Host "  SCCM IMPORT EXAMPLES" -ForegroundColor White
@@ -463,6 +531,13 @@ if ($Help) {
     Write-Host "      -SCCMPackagePath `"\\sccm01\SCCMSources\OSD\OSImages`" ``"
     Write-Host "      -SCCMPackageName `"Windows 11 25H2 - se, no - 2026-05-10`" ``"
     Write-Host "      -SCCMVersion `"25H2`" -SCCMPackageID `"FC100042`" -SCCMUpdateDPs"
+    Write-Host ""
+    Write-Host "  Update existing package and stage to a DP group (does not require -SCCMUpdateDPs):"
+    Write-Host "    .\WimWizard.ps1 -Languages `"se,no`" -Unattended ``"
+    Write-Host "      -SCCMImport -SCCMServer `"sccm01.fidelity.local`" -SCCMSiteCode `"FC1`" ``"
+    Write-Host "      -SCCMPackagePath `"\\sccm01\SCCMSources\OSD\OSImages`" ``"
+    Write-Host "      -SCCMPackageName `"Windows 11 25H2 - se, no - 2026-05-10`" ``"
+    Write-Host "      -SCCMVersion `"25H2`" -SCCMPackageID `"FC100042`" -SCCMDPGroup `"All DPs - Nordic`""
     Write-Host ""
     Write-Host "  NOTE: The SCCM console must be installed on the machine running WimWizard."
     Write-Host "        The account running the script needs SCCM Full Administrator rights."
@@ -635,8 +710,12 @@ function Get-CatalogSearchTerms {
     # Map build number to Windows version string as used in the Update Catalog
     # Microsoft uses "Version XX" (capital V) in LCU/SafeOS titles and
     # "version XX" (lowercase v) in .NET titles - match exactly.
+    # 26H2 boundary confirmed at build 26300 (Insider Experimental channel,
+    # build 26300.8697, June 2026 - shares 25H2 servicing branch via eKB).
+    # TODO: verify retail/Enterprise GA build number matches 26300.x before
+    # relying on this for production 26H2 ISOs - see devlog.
     $versionString = switch ($true) {
-        ($build -ge 27000)              { "26H2" }   # placeholder for future
+        ($build -ge 26300)              { "26H2" }
         ($build -ge 26200 -and $build -lt 26300) { "25H2" }
         ($build -ge 26100 -and $build -lt 26200) { "24H2" }
         ($build -ge 22631 -and $build -lt 26100) { "23H2" }
@@ -651,6 +730,11 @@ function Get-CatalogSearchTerms {
     # IMPORTANT: SafeOS titles in the Catalog combine 24H2 and 25H2 in one entry
     # e.g. "Safe OS Dynamic Update for Windows 11, versions 24H2 and 25H2"
     # LCU and .NET have separate entries per version.
+    # TODO (26H2): 25H2 and 26H2 share the same servicing branch (eKB), so MS
+    # may publish a similarly combined SafeOS title once 26H2 LCU/SafeOS
+    # entries exist in the public Catalog (currently Insider-only - no
+    # confirmed title string yet). Verify and update this branch when 26H2
+    # reaches GA - do not assume the title format below.
     $safeOSSearch = if ($versionString -in @("24H2","25H2")) {
         "Safe OS Dynamic Update for Windows 11, versions 24H2 and 25H2"
     } else {
@@ -1179,6 +1263,21 @@ function Invoke-AutoUpdateDownload {
                 Unblock-File -Path $destPath -ErrorAction SilentlyContinue
                 $sizeMB = [math]::Round((Get-Item $destPath).Length / 1MB, 0)
                 Write-OK "Downloaded: $originalName ($sizeMB MB)"
+
+                # Remove any other LCU .msu for this architecture now that the new one is
+                # confirmed on disk. Without this, an older KB's LCU can remain alongside the
+                # new one until the next run's Invoke-UpdateFolderCleanup pass. The $lcuFile
+                # selector later in the pipeline picks by alphabetical Sort-Object Name, not by
+                # KB number or date - with two LCUs present it silently selects the lower KB
+                # (older patch) since "kb5083482" sorts before "kb5083769". Pruning immediately
+                # after download guarantees only one LCU candidate exists for that selector,
+                # regardless of whether the next run's cleanup pass has occurred yet.
+                Get-ChildItem $DownloadDir -Filter "windows11.0-kb*-$archMsu*.msu" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -ne $originalName -and $_.Name -notmatch "kb5043080" } |
+                    ForEach-Object {
+                        Write-Info "Removing superseded LCU: $($_.Name)"
+                        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+                    }
 
                 # Also download checkpoint via same API
                 foreach ($m in $matches2) {
@@ -2737,6 +2836,71 @@ try {
     $script:SCCMImportFailed  = $false
     $script:SCCMImportSkipped = (-not $SCCMImport)
     if ($SCCMImport) {
+        # Adds the package to a distribution point group via Start-CMContentDistribution.
+        # This is distinct from Update-CMDistributionPoint ($SCCMUpdateDPs above), which
+        # only refreshes content on DPs/groups the package is already a member of - this
+        # is the operation that creates that membership in the first place. Must be called
+        # from inside the CM site PSDrive.
+        # Start-CMContentDistribution throws if the package is already a member of the
+        # target group, so that specific error is treated as a benign no-op rather than a
+        # failure - this keeps repeated monthly runs against the same package ID quiet.
+        # Verifies the source WIM is "stable" (non-zero size, unchanged across reads a
+        # few seconds apart, and a final existence check) before distribution is
+        # attempted, to avoid Distribution Manager racing a DFS-R replication lag or a
+        # lingering file handle right after the WIM was copied into place. Observed in
+        # practice: SCCM's "Distribution Manager failed to access the source directory"
+        # error on the first attempt, clearing on SCCM's own 30-minute automatic retry
+        # once the file settles - this aims to catch that before the first attempt.
+        function Test-SCCMSourceStable {
+            param(
+                [string]$Path,
+                [int]$Retries = 3,
+                [int]$DelaySeconds = 3
+            )
+            for ($i = 1; $i -le $Retries; $i++) {
+                if (-not (Test-Path -LiteralPath $Path)) { Start-Sleep -Seconds $DelaySeconds; continue }
+                try {
+                    $size1 = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+                } catch { Start-Sleep -Seconds $DelaySeconds; continue }
+                if ($size1 -le 0) { Start-Sleep -Seconds $DelaySeconds; continue }
+                Start-Sleep -Seconds $DelaySeconds
+                if (-not (Test-Path -LiteralPath $Path)) { continue }
+                try {
+                    $size2 = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+                } catch { continue }
+                if ($size2 -eq $size1) { return $true }
+            }
+            return $false
+        }
+
+        function Add-SCCMPackageToDPGroup {
+            param(
+                [string]$PackageID,
+                [string]$DPGroupName,
+                [string]$WimPath = ""
+            )
+            if (-not $DPGroupName) { return }
+            if ($WimPath -and -not (Test-SCCMSourceStable -Path $WimPath)) {
+                # Don't hard-fail on this - SCCM's own 30-minute automatic retry will
+                # still pick it up regardless - but log it so the cause is visible if
+                # the first distribution attempt does fail.
+                Write-Host "  [WARN] Source WIM did not appear stable before distribution: $WimPath" -ForegroundColor Yellow
+                Write-Log "WARN: Source WIM did not appear stable before distribution attempt: $WimPath" "WARN"
+            }
+            try {
+                Start-CMContentDistribution -OperatingSystemImageId $PackageID -DistributionPointGroupName $DPGroupName -ErrorAction Stop
+                Write-OK "Added to DP group: $DPGroupName"
+                Write-Log "SCCM package $PackageID added to DP group '$DPGroupName'"
+            } catch {
+                if ($_.Exception.Message -match 'already.*distribut') {
+                    Write-Log "SCCM package $PackageID already a member of DP group '$DPGroupName' - skipped"
+                    return
+                }
+                Write-Host "  [WARN] Failed to add package to DP group '$DPGroupName': $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-Log "WARN: Failed to add package $PackageID to DP group '$DPGroupName': $($_.Exception.Message)" "WARN"
+            }
+        }
+
         function Invoke-SCCMImport {
             param([string]$WimPath)
             Write-Section "SCCM Import"
@@ -2748,6 +2912,7 @@ try {
             Write-Log "  Version    : $(if ($SCCMVersion) { "$SCCMVersion (explicit)" } else { "(will use ISO-derived: $($CatalogSearchTerms.SafeOSVersion))" })"
             Write-Log "  Mode       : $(if ($SCCMPackageID) { "Update existing ($SCCMPackageID)" } else { "Create new" })"
             Write-Log "  Update DPs : $($SCCMUpdateDPs.IsPresent)"
+            Write-Log "  DP group   : $(if ($SCCMDPGroup) { $SCCMDPGroup } else { '(none)' })"
 
             $wimLeaf    = Split-Path $WimPath -Leaf
             $fullSource = "$SCCMPackagePath\$wimLeaf"
@@ -2810,6 +2975,7 @@ try {
                         Write-OK "DP update initiated (runs asynchronously in SCCM)"
                         Write-Log "SCCM DP update initiated for $SCCMPackageID"
                     }
+                    Add-SCCMPackageToDPGroup -PackageID $SCCMPackageID -DPGroupName $SCCMDPGroup -WimPath $fullSource
                 } else {
                     Write-Info "Creating new OS Image package..."
                     $newParams = @{
@@ -2828,6 +2994,7 @@ try {
                         Write-OK "DP update initiated (runs asynchronously in SCCM)"
                         Write-Log "SCCM DP update initiated for $($newPkg.PackageID)"
                     }
+                    Add-SCCMPackageToDPGroup -PackageID $newPkg.PackageID -DPGroupName $SCCMDPGroup -WimPath $fullSource
                 }
 
                 Pop-Location
@@ -2864,7 +3031,10 @@ try {
     } elseif ($script:SCCMImportFailed) {
         Write-Host "  SCCM import : FAILED - import manually from the SCCM tab or console" -ForegroundColor Yellow
     } else {
-        $dpNote = if ($SCCMUpdateDPs) { " (DP update initiated)" } else { "" }
+        $dpNote = if ($SCCMUpdateDPs -and $SCCMDPGroup) { " (DP update initiated; added to '$SCCMDPGroup')" }
+                  elseif ($SCCMUpdateDPs) { " (DP update initiated)" }
+                  elseif ($SCCMDPGroup) { " (added to DP group '$SCCMDPGroup')" }
+                  else { "" }
         Write-Host "  SCCM import : OK - $SCCMPackageName$dpNote" -ForegroundColor Green
     }
     Write-Host ""
