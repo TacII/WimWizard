@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   WimWizard-GUI.ps1 - Graphical launcher for WimWizard.ps1
 
@@ -14,11 +14,111 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.5.1
+  Version : 2.5.9
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.5.9  Fix: ISO probe job (background job started when a source folder is
+         selected) hardcoded the detected "edition" (the version string used
+         in the filename preview, e.g. "25H2") to '25H2' for any non-LTSC
+         ISO, regardless of the ISO's actual build number. A 24H2 ISO (build
+         26100.x) was therefore always previewed and built as
+         "Win11_25H2_26100.xxxx_..." - correct build number, wrong version
+         label. Root cause: the probe only ever checked the filename for the
+         string "ltsc"; it never consulted the build number at all, unlike
+         WimWizard.ps1's Get-CatalogSearchTerms, which already has correct
+         24H2/25H2/26H2 build-number boundaries. Added a Get-EditionFromBuild
+         helper (duplicated inside the Start-Job scriptblock, since jobs run
+         in an isolated runspace with no access to outer functions) that
+         mirrors those same boundaries, and now call it twice: once from the
+         filename-derived build number as a pre-mount best guess (used only
+         if an early return fires before the WIM is read), and again from the
+         real, mounted-image build number once it's known - the second call
+         is authoritative and overrides the first. LTSC still takes priority
+         over any build-number mapping, unchanged from before.
+  2.5.8  New: Add-SCCMPackageToDPGroup now verifies the source WIM is
+         "stable" (exists, non-zero size, unchanged across two reads a few
+         seconds apart) via new Test-SCCMSourceStable before calling
+         Start-CMContentDistribution. Addresses an observed real-world race
+         where Distribution Manager's first attempt failed with "failed to
+         access the source directory" immediately after a WimWizard build,
+         while the file was visibly present moments later - most likely a
+         DFS-R replication lag or a lingering file handle right after the
+         copy. SCCM's own 30-minute automatic retry already self-heals this,
+         so the check is advisory and bounded (waits up to ~9-12s across 3
+         retries, then proceeds regardless and lets SCCM's retry handle it
+         if still unstable) rather than blocking indefinitely. Applied to
+         all three SCCM-import call sites (Manual Import, Patch WIM, and the
+         equivalent function in WimWizard.ps1's auto-import-after-build).
+  2.5.7  Text: "Manually import a WIM with the settings above" reworded to
+         "Manually import a WIM with the settings from above".
+  2.5.6  Change: "Import WIM manually" path is no longer persisted to the
+         registry at all (SCCM_LastBuiltWim removed from both Save-Settings
+         and Load-Settings). Still auto-fills with the path of a WIM just
+         built in the current session, for convenience - just never
+         remembered across app launches.
+         New: auto-connect to SCCM on launch when a server and site code
+         were previously saved (and the CM module is present), so the
+         Distribution point group dropdown is correctly prefilled with the
+         saved selection without requiring a manual "Connect" click first.
+         Connect button logic extracted into Invoke-SCCMConnect so both the
+         button and startup auto-connect share one implementation.
+         Fix: the initial settings-snapshot (used to detect unsaved changes
+         and prompt on close) is now taken AFTER auto-connect runs, not
+         before - otherwise restoring the saved DP group on launch looked
+         like an unsaved change and triggered a spurious "Save settings?"
+         prompt on close even when nothing had actually changed.
+  2.5.5  Minor: "Find Package ID in SCCM..." hint under the Package ID field
+         moved left to x=14 (inline with the radio button circle above it,
+         was x=32 / aligned with the radio's text) and down 2px.
+         Text: "Manual import with settings above" heading reworded to
+         "Manually import a WIM with the settings above".
+  2.5.4  Fix: DP group dropdown now sits exactly 5px right of its label
+         (computed from the label's actual rendered width, not a hardcoded
+         x) instead of a wider fixed gap.
+         Fix: Manual Import's live summary was a single-line RichTextBox
+         that wrapped once "DP group" was added as a 4th field. Replaced
+         with a two-row, two-column label grid (no borders): Package name
+         + Mode on row 1, Update DPs + DP group on row 2. "Mode:" and
+         "DP group:" captions now start at the same x regardless of how
+         long the row's first value is.
+         Fix: the bottom Command: preview (Build-CommandString) never
+         included any -SCCMImport arguments at all, including -SCCMDPGroup
+         - a pre-existing gap, not introduced by the DP group feature. The
+         preview and the actual launcher (a separate, duplicated arg-building
+         code path - RunClick builds its own $argList independently) had
+         drifted apart. Added the same SCCM arg block to Build-CommandString
+         so the preview now matches what Run actually executes.
+  2.5.3  Fix: Distribution point group dropdown (added in 2.5.2) was clipped
+         at the bottom of its panel - moved to its own row below "Update
+         distribution points after import" instead of squeezed beside it,
+         and the panel grown to fit (280px -> 316px). "Test connection"
+         button renamed to "Connect" (help text and tooltip updated to
+         match). Dropdown now shows "Not connected" as the sole item until
+         a successful Connect populates real DP groups (previously showed
+         <None> even before connecting). New Get-SelectedSCCMDPGroup helper
+         centralizes reading the selection so "Not connected" is never
+         mistaken for a real group name and sent to an SCCM cmdlet.
+         Selection is now saved to the registry immediately on change
+         (not just at Save-Settings time) and is re-applied as the default
+         the next time the user connects, ahead of any previously
+         in-memory-selected value.
+  2.5.2  New: "Distribution point group" dropdown in the SCCM tab's Image
+         Building Options section, next to the existing "Update distribution
+         points after import" checkbox. Populated from Get-CMDistributionPointGroup
+         right after a successful Test Connection; includes <None>. Independent
+         of the Update DPs checkbox - that only refreshes content on DPs/groups
+         already assigned to the package, while this adds the package to a group
+         it isn't yet a member of (Start-CMContentDistribution), for staged
+         rollout (e.g. one DP for testing, then a group once validated). Applied
+         uniformly across Manual Import, auto-import-after-build (new -SCCMDPGroup
+         CLI arg to WimWizard.ps1), and the Patch WIM -> SCCM flow. Selection is
+         persisted to the registry and restored once the group list is repopulated.
+         Failures adding to the group are non-fatal (warning only, surfaced via
+         $Script:SCCMDPGroupFailReason on the Manual Import and Patch WIM
+         completion screens) and don't roll back an otherwise-successful package
+         create/update.
   2.5.1  Fix: Image edition ComboBox now triggers command preview update on
          selection change (Add_SelectedIndexChanged wired to Update-UI).
          Fix: Receive-Job result coerced to single string to prevent index
@@ -414,7 +514,12 @@ function Save-Settings {
   Set-ItemProperty $RegPath -Name "SCCM_PackageID"   -Value $TxtSCCMPackageID.Text
   Set-ItemProperty $RegPath -Name "SCCM_AutoImport"  -Value ([int]$ChkSCCMAutoImport.Checked)
   Set-ItemProperty $RegPath -Name "SCCM_UpdateDPs"   -Value ([int]$ChkSCCMUpdateDPs.Checked)
-  # Note: SCCM_LastBuiltWim is written separately on build completion, not here
+  if ($CmbSCCMDPGroup -and $CmbSCCMDPGroup.SelectedItem -and $CmbSCCMDPGroup.SelectedItem.ToString() -ne "Not connected") {
+    Set-ItemProperty $RegPath -Name "SCCM_DPGroup" -Value $CmbSCCMDPGroup.SelectedItem.ToString()
+  }
+  # If still showing the "Not connected" placeholder, leave any previously saved
+  # SCCM_DPGroup value untouched rather than overwriting it with the placeholder.
+  # Note: "Import WIM manually" path is intentionally never persisted (see above)
   # Patch WIM tab settings
   Set-ItemProperty $RegPath -Name "PatchWIM_PackageID"   -Value $TxtPatchWimPkgID.Text
   Set-ItemProperty $RegPath -Name "PatchWIM_PackageName" -Value $TxtPatchWimPkgName.Text
@@ -467,9 +572,14 @@ function Load-Settings {
       $TxtSCCMWimPath.BackColor = if ($manual) { [System.Drawing.Color]::FromArgb(62,62,62) } else { [System.Drawing.Color]::FromArgb(45,45,45) }
     }
     if ($reg.PSObject.Properties["SCCM_UpdateDPs"])    { $ChkSCCMUpdateDPs.Checked  = [bool]$reg.SCCM_UpdateDPs }
-    if ($reg.PSObject.Properties["SCCM_LastBuiltWim"] -and $reg.SCCM_LastBuiltWim) {
-      $TxtSCCMWimPath.Text = $reg.SCCM_LastBuiltWim
+    if ($reg.PSObject.Properties["SCCM_DPGroup"] -and $reg.SCCM_DPGroup -and $reg.SCCM_DPGroup -ne "<None>") {
+      # Dropdown is only populated with real CM group names after a successful Test
+      # Connection; stash the saved name so Update-SCCMDPGroupList can restore it once
+      # the list is fetched.
+      $Script:PendingSCCMDPGroup = $reg.SCCM_DPGroup
     }
+    # Note: "Import WIM manually" path is intentionally never persisted/restored
+    # across sessions (per explicit request) - it always starts empty.
     # Patch WIM tab settings
     if ($reg.PSObject.Properties["PatchWIM_PackageID"])   { $TxtPatchWimPkgID.Text   = $reg.PatchWIM_PackageID }
     if ($reg.PSObject.Properties["PatchWIM_PackageName"]) { $TxtPatchWimPkgName.Text  = $reg.PatchWIM_PackageName }
@@ -637,7 +747,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.4.6"
+$WimWizardVersion = "2.5.9"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -973,6 +1083,26 @@ function Start-ISOProbe {
   $probeFolder = $TxtSource.Text
   $Script:ProbeJob = Start-Job -ScriptBlock {
     param($Folder)
+
+    # Maps a build number to the Windows 11 version string, using the same
+    # boundaries as Get-CatalogSearchTerms in WimWizard.ps1 (kept in sync -
+    # see devlog if the boundaries there ever change).
+    # NOTE: this is a separate copy because Start-Job runs in an isolated
+    # runspace with no access to functions defined outside the scriptblock.
+    function Get-EditionFromBuild {
+      param([string]$BuildStr, [bool]$IsLtsc)
+      if ($IsLtsc) { return 'LTSC2024' }
+      $buildNum = 0
+      if ($BuildStr -match '^(\d+)') { $buildNum = [int]$Matches[1] }
+      switch ($true) {
+        ($buildNum -ge 26300)                      { return '26H2' }
+        ($buildNum -ge 26200 -and $buildNum -lt 26300) { return '25H2' }
+        ($buildNum -ge 26100 -and $buildNum -lt 26200) { return '24H2' }
+        ($buildNum -ge 22631 -and $buildNum -lt 26100) { return '23H2' }
+        default                                     { return '25H2' }
+      }
+    }
+
     if (-not (Test-Path $Folder)) { return 'WIMWIZ:26200.xxxx|25H2' }
     $isoPath = $null
     try {
@@ -984,14 +1114,20 @@ function Start-ISOProbe {
       if (-not $probeISO) { $probeISO = $winISOs[0] }
       $isoName = $probeISO.Name
 
-      # Detect edition from ISO filename
-      $edition = if ($isoName -match 'ltsc') { 'LTSC2024' } else { '25H2' }
+      $isLtsc = $isoName -match 'ltsc'
 
       # Try filename first for build number - but still need to mount for index list
       $buildFromFilename = $null
       if ($isoName -match '(\d{5})[\._](\d{4,5})') {
         $buildFromFilename = "$($Matches[1]).$($Matches[2])"
       }
+
+      # Best guess before mounting: from the filename's build number if we
+      # found one, otherwise fall back to LTSC-or-25H2 (previous behavior).
+      # This is only used if an early return below fires before the WIM is
+      # actually read - the real, authoritative value is recomputed after
+      # mounting (see $edition reassignment further down).
+      $edition = Get-EditionFromBuild -BuildStr $buildFromFilename -IsLtsc $isLtsc
 
       # Mount ISO and read WIM index list
       # All intermediate results assigned to typed variables to prevent implicit pipeline output
@@ -1013,6 +1149,10 @@ function Start-ISOProbe {
       if (-not $info) { Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null; return "WIMWIZ:26200.xxxx|$edition|" }
       [object]$full = Get-WindowsImage -ImagePath $wim -Index $info.ImageIndex -ErrorAction SilentlyContinue
       [string]$build = if ($buildFromFilename) { $buildFromFilename } else { [string]($full.Version -replace '^\d+\.\d+\.', '') }
+      # Recompute from the real, mounted-image build number - this is the
+      # authoritative value and overrides the pre-mount filename-based guess
+      # above (fixes 24H2 ISOs being mislabeled 25H2 in the filename preview).
+      $edition = Get-EditionFromBuild -BuildStr $build -IsLtsc $isLtsc
       [string]$indexList = ($allImages | ForEach-Object { "$($_.ImageIndex):$($_.ImageName)" }) -join '~'
       Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null
       return "WIMWIZ:$build|$edition|$indexList"
@@ -1662,34 +1802,99 @@ function Update-SCCMPreview {
 }
 
 function Update-SCCMSummary {
-  if (-not $RtbSCCMSummary) { return }
+  if (-not $LblSummaryPkgName) { return }
   $pkgName = Resolve-SCCMNameTemplate
   if (-not $pkgName) { $pkgName = "(empty)" }
   $mode = if ($RadSCCMUpdate.Checked) {
     $id = $TxtSCCMPackageID.Text.Trim()
     if ($id) { "Update existing package ($id)" } else { "Update existing package (no ID set)" }
   } else { "Create new package" }
-  $dps = if ($ChkSCCMUpdateDPs.Checked) { "Yes" } else { "No" }
+  $dps     = if ($ChkSCCMUpdateDPs.Checked) { "Yes" } else { "No" }
+  $dpGroup = if ($CmbSCCMDPGroup -and $CmbSCCMDPGroup.SelectedItem -and $CmbSCCMDPGroup.SelectedItem -ne "<None>") { $CmbSCCMDPGroup.SelectedItem } else { "<None>" }
 
-  $RtbSCCMSummary.Clear()
-  $colWhite = [System.Drawing.Color]::White
-  $colGreen = [System.Drawing.Color]::FromArgb(0, 200, 80)
+  $LblSummaryPkgName.Text   = $pkgName
+  $LblSummaryMode.Text      = $mode
+  $LblSummaryUpdateDPs.Text = $dps
+  $LblSummaryDPGroup.Text   = $dpGroup
+}
 
-  # Helper: append text in a given colour
-  $appendColour = {
-    param([string]$text, [System.Drawing.Color]$col)
-    $start = $RtbSCCMSummary.TextLength
-    $RtbSCCMSummary.AppendText($text)
-    $RtbSCCMSummary.Select($start, $text.Length)
-    $RtbSCCMSummary.SelectionColor = $col
+# Reads the DP group dropdown, normalizing the "Not connected" placeholder
+# (shown before any successful Test Connection) to "<None>" so callers never
+# accidentally pass the placeholder string to an SCCM cmdlet.
+function Get-SelectedSCCMDPGroup {
+  if (-not $CmbSCCMDPGroup -or -not $CmbSCCMDPGroup.SelectedItem) { return "<None>" }
+  $sel = $CmbSCCMDPGroup.SelectedItem.ToString()
+  if ($sel -eq "Not connected") { return "<None>" }
+  return $sel
+}
+
+# Adds an OS image package to a distribution point group via Start-CMContentDistribution.
+# This is distinct from Update-CMDistributionPoint (which only refreshes content on
+# DPs/groups the package is already a member of) - it's the operation that creates
+# that membership in the first place. Must be called from inside the CM site PSDrive
+# (i.e. after Push-Location "$siteCode`:\").
+# Start-CMContentDistribution throws if the package is already a member of the target
+# group, so membership is checked first and the distribution call is skipped if it's
+# already there - this keeps repeated monthly runs against the same package ID quiet.
+#
+# Before distributing, optionally verifies the source WIM is "stable" (non-zero size,
+# unchanged across two reads a couple of seconds apart, and a final Test-Path) to avoid
+# Distribution Manager racing a DFS-R replication lag or a lingering file handle right
+# after the WIM was copied into place. Observed in practice: SCCM's "Distribution
+# Manager failed to access the source directory" error on the first attempt, which then
+# clears on SCCM's own automatic retry once the file settles - this check aims to catch
+# that before the first attempt instead of relying on the 30-minute retry.
+function Test-SCCMSourceStable {
+  param(
+    [string]$Path,
+    [int]$Retries = 3,
+    [int]$DelaySeconds = 3
+  )
+  for ($i = 1; $i -le $Retries; $i++) {
+    if (-not (Test-Path -LiteralPath $Path)) { Start-Sleep -Seconds $DelaySeconds; continue }
+    try {
+      $size1 = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+    } catch { Start-Sleep -Seconds $DelaySeconds; continue }
+    if ($size1 -le 0) { Start-Sleep -Seconds $DelaySeconds; continue }
+    Start-Sleep -Seconds $DelaySeconds
+    if (-not (Test-Path -LiteralPath $Path)) { continue }
+    try {
+      $size2 = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+    } catch { continue }
+    if ($size2 -eq $size1) { return $true }
   }
-  & $appendColour "Package name:  " $colWhite
-  & $appendColour "$pkgName`r`n"    $colGreen
-  & $appendColour "Mode:  "         $colWhite
-  & $appendColour "$mode`r`n"       $colGreen
-  & $appendColour "Update DPs:  "   $colWhite
-  & $appendColour $dps              $colGreen
-  $RtbSCCMSummary.Select(0, 0)
+  return $false
+}
+
+function Add-SCCMPackageToDPGroup {
+  param(
+    [string]$PackageID,
+    [string]$DPGroupName,
+    [string]$WimPath = ""
+  )
+  if (-not $DPGroupName -or $DPGroupName -eq "<None>") { return }
+  if ($WimPath -and -not (Test-SCCMSourceStable -Path $WimPath)) {
+    # File never settled within the retry window. Don't hard-fail the whole
+    # operation on this - SCCM's own 30-minute automatic retry will still pick
+    # it up regardless - but note it so the reason is visible if the first
+    # distribution attempt does fail, rather than that being a silent mystery.
+    $Script:SCCMDPGroupFailReason = "Source WIM did not appear stable before distribution was attempted ($WimPath) - SCCM's automatic retry should pick this up."
+  }
+  try {
+    Start-CMContentDistribution -OperatingSystemImageId $PackageID -DistributionPointGroupName $DPGroupName -ErrorAction Stop
+  } catch {
+    if ($_.Exception.Message -match 'already.*distribut') {
+      # Package is already a member of this DP group - not an error condition.
+      return
+    }
+    # Non-fatal by design, matching Update-CMDistributionPoint's -ErrorAction
+    # SilentlyContinue above: the package itself was already created/updated
+    # successfully, so a DP group failure here should not block or roll that back.
+    # Surfaced via $Script:SCCMDPGroupFailReason rather than a popup, since this
+    # runs from both the interactive Manual Import button and the unattended
+    # Patch WIM background flow.
+    $Script:SCCMDPGroupFailReason = $_.Exception.Message
+  }
 }
 
 function Invoke-SCCMImport {
@@ -1701,6 +1906,7 @@ function Invoke-SCCMImport {
   $version   = if ($Script:EditionTag) { $Script:EditionTag } else { "" }
   $comment   = $TxtSCCMComment.Text.Trim()
   $updateDPs = $ChkSCCMUpdateDPs.Checked
+  $dpGroup   = Get-SelectedSCCMDPGroup
   $modeUpdate = $RadSCCMUpdate.Checked
   $packageID  = $TxtSCCMPackageID.Text.Trim()
 
@@ -1765,6 +1971,7 @@ function Invoke-SCCMImport {
       if ($updateDPs) {
         Update-CMDistributionPoint -OperatingSystemImageId $packageID -ErrorAction SilentlyContinue
       }
+      Add-SCCMPackageToDPGroup -PackageID $packageID -DPGroupName $dpGroup -WimPath $fullSource
     } else {
       $newPkg = New-CMOperatingSystemImage `
           -Name        $pkgName `
@@ -1775,6 +1982,7 @@ function Invoke-SCCMImport {
       if ($updateDPs) {
         Update-CMDistributionPoint -OperatingSystemImageId $newPkg.PackageID -ErrorAction SilentlyContinue
       }
+      Add-SCCMPackageToDPGroup -PackageID $newPkg.PackageID -DPGroupName $dpGroup -WimPath $fullSource
     }
     Pop-Location
     return $true
@@ -1790,6 +1998,8 @@ function Invoke-SCCMImport {
 # -- CM module availability check (run once at form startup) -------------------
 $Script:SCCMModuleAvailable = $false
 $Script:SCCMModulePath      = ""
+$Script:PendingSCCMDPGroup  = $null
+$Script:SCCMDPGroupFailReason = $null
 if ($env:SMS_ADMIN_UI_PATH) {
   $Script:SCCMModulePath = Join-Path $env:SMS_ADMIN_UI_PATH "..\ConfigurationManager.psd1"
   $Script:SCCMModuleAvailable = (Test-Path $Script:SCCMModulePath)
@@ -1891,7 +2101,7 @@ $Script:SCCMModuleTip.SetToolTip($LblSCCMModuleCheck,
   "If not found: install the SCCM console on this machine, then restart WIM Wizard.`r`n" +
   "The console version must match your site server version.`r`n`r`n" +
   "Without the CM module, all tab fields are saved to registry and passed to WimWizard.ps1,`r`n" +
-  "but the Test Connection and Import buttons are disabled.")
+  "but the Connect and Import buttons are disabled.")
 $TabSCCM.Controls.Add($LblSCCMModuleCheck)
 $sy += 28
 
@@ -1917,9 +2127,9 @@ $TxtSCCMSiteCode.Text            = ""
 $TxtSCCMSiteCode.CharacterCasing = "Upper"
 $TxtSCCMSiteCode.Add_TextChanged({ Update-SCCMSummary })
 
-# Test connection button
+# Connect button (tests SCCM site connection)
 $BtnSCCMTest = New-Object System.Windows.Forms.Button
-$BtnSCCMTest.Text      = "Test connection"
+$BtnSCCMTest.Text      = "Connect"
 $BtnSCCMTest.Location  = New-Object System.Drawing.Point(530, $py)
 $BtnSCCMTest.Size      = New-Object System.Drawing.Size(130, 22)
 $BtnSCCMTest.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
@@ -1939,13 +2149,60 @@ $LblSCCMStatus.Location  = New-Object System.Drawing.Point(10, $py)
 $LblSCCMStatus.AutoSize  = $true
 $Sec1.Controls.Add($LblSCCMStatus)
 
-$BtnSCCMTest.Add_Click({
+# Populates the Distribution point group dropdown from CM. Called after a
+# successful Test Connection. Selection priority: the registry-saved value if
+# it still exists among the retrieved groups, otherwise the previous in-memory
+# selection if still valid, otherwise <None>. On failure to retrieve groups
+# (despite a working site connection), falls back to <None> only - "Not
+# connected" is reserved for the pre-connection / failed-connection state.
+function Update-SCCMDPGroupList {
+  param([string]$SiteCode)
+  if (-not $CmbSCCMDPGroup) { return }
+  $prevSelection = if ($CmbSCCMDPGroup.SelectedItem -and $CmbSCCMDPGroup.SelectedItem.ToString() -ne "Not connected") { $CmbSCCMDPGroup.SelectedItem.ToString() } else { $null }
+  try {
+    Push-Location "$SiteCode`:\" -ErrorAction Stop
+    $groups = @(Get-CMDistributionPointGroup -ErrorAction Stop | Sort-Object Name)
+    Pop-Location
+  } catch {
+    Pop-Location -ErrorAction SilentlyContinue
+    $CmbSCCMDPGroup.Items.Clear()
+    [void]$CmbSCCMDPGroup.Items.Add("<None>")
+    $CmbSCCMDPGroup.SelectedIndex = 0
+    return
+  }
+  $CmbSCCMDPGroup.Items.Clear()
+  [void]$CmbSCCMDPGroup.Items.Add("<None>")
+  foreach ($g in $groups) { [void]$CmbSCCMDPGroup.Items.Add($g.Name) }
+
+  # Registry-saved value takes priority on each fresh connection (the request
+  # was: remember the chosen group and default to it next time the user
+  # connects), then a pending value restored at app load, then whatever was
+  # already selected in-memory, then <None>.
+  $savedGroup = $null
+  if (Test-Path $RegPath) {
+    $reg = Get-ItemProperty $RegPath -ErrorAction SilentlyContinue
+    if ($reg -and $reg.PSObject.Properties["SCCM_DPGroup"] -and $reg.SCCM_DPGroup) { $savedGroup = $reg.SCCM_DPGroup }
+  }
+
+  if ($savedGroup -and $CmbSCCMDPGroup.Items.Contains($savedGroup)) {
+    $CmbSCCMDPGroup.SelectedItem = $savedGroup
+  } elseif ($Script:PendingSCCMDPGroup -and $CmbSCCMDPGroup.Items.Contains($Script:PendingSCCMDPGroup)) {
+    $CmbSCCMDPGroup.SelectedItem = $Script:PendingSCCMDPGroup
+  } elseif ($prevSelection -and $CmbSCCMDPGroup.Items.Contains($prevSelection)) {
+    $CmbSCCMDPGroup.SelectedItem = $prevSelection
+  } else {
+    $CmbSCCMDPGroup.SelectedIndex = 0
+  }
+  $Script:PendingSCCMDPGroup = $null
+}
+
+function Invoke-SCCMConnect {
   $server   = $TxtSCCMServer.Text.Trim()
   $siteCode = $TxtSCCMSiteCode.Text.Trim().ToUpper()
   if (-not $server -or -not $siteCode) {
     $LblSCCMStatus.Text      = "Enter server FQDN and site code first."
     $LblSCCMStatus.ForeColor = $ColWarn
-    return
+    return $false
   }
   $LblSCCMStatus.Text      = "Testing..."
   $LblSCCMStatus.ForeColor = $ColSubtext
@@ -1959,11 +2216,21 @@ $BtnSCCMTest.Add_Click({
     Pop-Location
     $LblSCCMStatus.Text      = [char]0x2714 + "  Connected to $siteCode on $server"
     $LblSCCMStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+    Update-SCCMDPGroupList -SiteCode $siteCode
+    return $true
   } catch {
     $LblSCCMStatus.Text      = [char]0x2718 + "  Failed: $($_.Exception.Message)"
     $LblSCCMStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
+    if ($CmbSCCMDPGroup) {
+      $CmbSCCMDPGroup.Items.Clear()
+      [void]$CmbSCCMDPGroup.Items.Add("Not connected")
+      $CmbSCCMDPGroup.SelectedIndex = 0
+    }
+    return $false
   }
-})
+}
+
+$BtnSCCMTest.Add_Click({ Invoke-SCCMConnect | Out-Null })
 
 $sy += 80 + 12   # section height + gap
 
@@ -1973,7 +2240,7 @@ $sy += 80 + 12   # section height + gap
 New-SCCMHeading "  Package details" $sy | Out-Null
 $sy += 26
 
-$Sec2 = New-SCCMSection $sy 280
+$Sec2 = New-SCCMSection $sy 316
 $py   = 10
 
 # Package storage path
@@ -2121,8 +2388,45 @@ $ChkSCCMUpdateDPs.Width     = 400
 $ChkSCCMUpdateDPs.BackColor = [System.Drawing.Color]::Transparent
 $ChkSCCMUpdateDPs.Add_CheckedChanged({ Update-SCCMSummary })
 $Sec2.Controls.Add($ChkSCCMUpdateDPs)
+$py += 26
 
-$sy += 280 + 12
+# Distribution point group selector - independent of the "Update DPs" checkbox above.
+# Update-CMDistributionPoint (the checkbox) only refreshes content on DPs/groups the
+# package is ALREADY a member of. Adding the package to a DP group it is not yet a
+# member of is a separate CM operation (Start-CMContentDistribution), used here to
+# do staged rollout (e.g. one DP for testing, then a group once validated).
+# Shows "Not connected" (sole, unselectable-in-practice item) until a successful
+# Test Connection populates real group names; reverts to that state if SCCM module
+# isn't available at all.
+$LblDPGroup = New-Object System.Windows.Forms.Label
+$LblDPGroup.Text      = "Distribution point group:"
+$LblDPGroup.Font      = $FontMain
+$LblDPGroup.ForeColor = $ColFg
+$LblDPGroup.Location  = New-Object System.Drawing.Point(14, ($py + 3))
+$LblDPGroup.AutoSize  = $true
+$Sec2.Controls.Add($LblDPGroup)
+
+$CmbSCCMDPGroup = New-Object System.Windows.Forms.ComboBox
+$CmbSCCMDPGroup.Location      = New-Object System.Drawing.Point(($LblDPGroup.Right + 5), $py)
+$CmbSCCMDPGroup.Size          = New-Object System.Drawing.Size(264, 22)
+$CmbSCCMDPGroup.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+$CmbSCCMDPGroup.BackColor     = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$CmbSCCMDPGroup.ForeColor     = $ColFg
+$CmbSCCMDPGroup.FlatStyle     = "Flat"
+[void]$CmbSCCMDPGroup.Items.Add("Not connected")
+$CmbSCCMDPGroup.SelectedIndex = 0
+$CmbSCCMDPGroup.Add_SelectedIndexChanged({
+  Update-SCCMSummary
+  # Only persist real selections (post-connection), never the placeholder.
+  if ($CmbSCCMDPGroup.SelectedItem -and $CmbSCCMDPGroup.SelectedItem.ToString() -ne "Not connected") {
+    if (-not (Test-Path $RegPath)) { New-Item $RegPath -Force | Out-Null }
+    Set-ItemProperty $RegPath -Name "SCCM_DPGroup" -Value $CmbSCCMDPGroup.SelectedItem.ToString()
+  }
+})
+$Sec2.Controls.Add($CmbSCCMDPGroup)
+$py += 30
+
+$sy += 316 + 12
 
 # ==============================================================================
 # SECTION 3 - Import mode (part of Image Building Options)
@@ -2199,32 +2503,63 @@ $LblSCCMPkgStatus.AutoSize  = $true
 $LblSCCMPkgStatus.Visible   = $false
 $Sec3.Controls.Add($LblSCCMPkgStatus)
 
-New-PHint $Sec3 "Find Package ID in SCCM: Software Library -> Operating Systems -> Operating System Images -> right-click -> Properties -> General." 32 $py 660 | Out-Null
+New-PHint $Sec3 "Find Package ID in SCCM: Software Library -> Operating Systems -> Operating System Images -> right-click -> Properties -> General." 14 ($py + 2) 660 | Out-Null
 
 $sy += 100 + 12
 
 # ==============================================================================
 # SECTION 4 - Manual import
 # ==============================================================================
-New-SCCMHeading "  Manual import with settings above" $sy | Out-Null
+New-SCCMHeading "  Manually import a WIM with the settings from above" $sy | Out-Null
 $sy += 26
 
 $Sec4 = New-SCCMSection $sy 162
 $py   = 8
 
-# Live summary - RichTextBox for mixed-colour text (white labels, green values)
-$RtbSCCMSummary = New-Object System.Windows.Forms.RichTextBox
-$RtbSCCMSummary.Location    = New-Object System.Drawing.Point(14, $py)
-$RtbSCCMSummary.Size        = New-Object System.Drawing.Size(670, 48)
-$RtbSCCMSummary.Font        = $FontSmall
-$RtbSCCMSummary.BackColor   = $ColSCCMSection
-$RtbSCCMSummary.ForeColor   = $ColFg
-$RtbSCCMSummary.BorderStyle = "None"
-$RtbSCCMSummary.ReadOnly    = $true
-$RtbSCCMSummary.TabStop     = $false
-$RtbSCCMSummary.Cursor      = [System.Windows.Forms.Cursors]::Default
-$Sec4.Controls.Add($RtbSCCMSummary)
-$py += 52
+# Live summary - two-row label grid (no borders) instead of a single flowing
+# RichTextBox, so long values don't wrap and column 2 ("Mode:" / "DP group:")
+# stays aligned regardless of how long the column 1 values get.
+# Row 1: Package name | Mode      Row 2: Update DPs | DP group
+$Script:SCCMSummaryCol2X    = 360   # x where "Mode:" / "DP group:" captions start
+$Script:SCCMSummaryRightEnd = 688   # right edge, matches $sepAction below (14 + 674)
+$colWhite = [System.Drawing.Color]::White
+$colGreen = [System.Drawing.Color]::FromArgb(0, 200, 80)
+
+function New-SCCMSummaryCaption {
+  param($Parent, [string]$Text, [int]$X, [int]$Y)
+  $l = New-Object System.Windows.Forms.Label
+  $l.Text      = $Text
+  $l.Font      = $FontSmall
+  $l.ForeColor = $colWhite
+  $l.Location  = New-Object System.Drawing.Point($X, $Y)
+  $l.AutoSize  = $true
+  $Parent.Controls.Add($l)
+  return $l
+}
+function New-SCCMSummaryValue {
+  param($Parent, [int]$X, [int]$Y, [int]$Right)
+  $l = New-Object System.Windows.Forms.Label
+  $l.Text         = ""
+  $l.Font         = $FontSmall
+  $l.ForeColor    = $colGreen
+  $l.Location     = New-Object System.Drawing.Point($X, $Y)
+  $l.Size         = New-Object System.Drawing.Size(([Math]::Max(20, $Right - $X)), 18)
+  $l.AutoEllipsis = $true
+  $Parent.Controls.Add($l)
+  return $l
+}
+
+$_capPkgName = New-SCCMSummaryCaption $Sec4 "Package name:" 14 $py
+$LblSummaryPkgName = New-SCCMSummaryValue $Sec4 ($_capPkgName.Right + 6) $py ($Script:SCCMSummaryCol2X - 6)
+$_capMode = New-SCCMSummaryCaption $Sec4 "Mode:" $Script:SCCMSummaryCol2X $py
+$LblSummaryMode = New-SCCMSummaryValue $Sec4 ($_capMode.Right + 6) $py $Script:SCCMSummaryRightEnd
+$py += 20
+
+$_capUpdateDPs = New-SCCMSummaryCaption $Sec4 "Update DPs:" 14 $py
+$LblSummaryUpdateDPs = New-SCCMSummaryValue $Sec4 ($_capUpdateDPs.Right + 6) $py ($Script:SCCMSummaryCol2X - 6)
+$_capDPGroup = New-SCCMSummaryCaption $Sec4 "DP group:" $Script:SCCMSummaryCol2X $py
+$LblSummaryDPGroup = New-SCCMSummaryValue $Sec4 ($_capDPGroup.Right + 6) $py $Script:SCCMSummaryRightEnd
+$py += 24
 
 # Separator between summary and action row
 $sepAction = New-Object System.Windows.Forms.Panel
@@ -2273,10 +2608,15 @@ $BtnSCCMImport.Add_Click({
       "No WIM Selected", "OK", "Warning") | Out-Null
     return
   }
+  $Script:SCCMDPGroupFailReason = $null
   $ok = Invoke-SCCMImport -WimPath $wim
   if ($ok) {
+    $msg = "SCCM import completed successfully."
+    if ($Script:SCCMDPGroupFailReason) {
+      $msg += "`n`nNote: adding the package to the selected DP group failed:`n$($Script:SCCMDPGroupFailReason)`n`nYou can retry this from the SCCM console."
+    }
     [System.Windows.Forms.MessageBox]::Show(
-      "SCCM import completed successfully.",
+      $msg,
       "Import Complete", "OK", "Information") | Out-Null
   }
 })
@@ -2902,7 +3242,7 @@ top of the tab for details if it shows red.
 
 Server (FQDN):   FQDN of your SCCM primary site server.
 Site code:       Three-character site code (e.g. FC1).
-                 Use "Test connection" to verify before running.
+                 Use "Connect" to verify before running.
 
 Package storage path:
   UNC path where SCCM reads the WIM from. Must be accessible by the SCCM
@@ -2932,6 +3272,14 @@ Import mode:
 Auto-import:  Runs import automatically after a successful build.
 Update DPs:   Triggers a distribution point update after import.
               DP replication is asynchronous - WIM Wizard only initiates it.
+Distribution point group:
+              Adds the package to a specific DP group (separate from Update
+              DPs above - that only refreshes content on DPs/groups already
+              assigned to the package; this adds it to a group for the first
+              time). Useful for staged rollout: distribute to one DP for
+              testing, then to a group once validated. Populated from SCCM
+              after a successful "Connect"; shows "Not connected" until then.
+              Your choice is remembered and offered again next time you connect.
 
 WIM to import: Pre-filled with the last successfully built WIM. Browse to
   select a different file (e.g. to import an older build manually).
@@ -3219,7 +3567,8 @@ function Get-SettingsSnapshot {
   $langs = ($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $apps  = ($AppCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $fods  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
-  $sccm  = "$($TxtSCCMServer.Text)|$($TxtSCCMSiteCode.Text)|$($TxtSCCMPath.Text)|$($TxtSCCMNameTemplate.Text)|$($TxtSCCMComment.Text)|$([int]$RadSCCMUpdate.Checked)|$($TxtSCCMPackageID.Text)|$([int]$ChkSCCMAutoImport.Checked)|$([int]$ChkSCCMUpdateDPs.Checked)"
+  $dpGroup = if ($CmbSCCMDPGroup -and $CmbSCCMDPGroup.SelectedItem) { $CmbSCCMDPGroup.SelectedItem.ToString() } else { "<None>" }
+  $sccm  = "$($TxtSCCMServer.Text)|$($TxtSCCMSiteCode.Text)|$($TxtSCCMPath.Text)|$($TxtSCCMNameTemplate.Text)|$($TxtSCCMComment.Text)|$([int]$RadSCCMUpdate.Checked)|$($TxtSCCMPackageID.Text)|$([int]$ChkSCCMAutoImport.Checked)|$([int]$ChkSCCMUpdateDPs.Checked)|$dpGroup"
   return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$sccm"
 }
 
@@ -3290,6 +3639,33 @@ function Build-CommandString {
   if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) {
     $cmd += " -ARM64"
   }
+
+  # SCCM import args - mirrors the real launcher's arg-building logic exactly
+  # (only shown when auto-import is enabled and the CM module is present, since
+  # that's the only case the actual run will include them).
+  if ($ChkSCCMAutoImport -and $ChkSCCMAutoImport.Checked -and $Script:SCCMModuleAvailable) {
+    $sccmServer  = $TxtSCCMServer.Text.Trim()
+    $sccmCode    = $TxtSCCMSiteCode.Text.Trim()
+    $sccmPath    = $TxtSCCMPath.Text.Trim()
+    $sccmName    = Resolve-SCCMNameTemplate
+    $sccmVer     = if ($Script:EditionTag) { $Script:EditionTag } else { "" }
+    $sccmComment = $TxtSCCMComment.Text.Trim()
+    $sccmPkgID   = $TxtSCCMPackageID.Text.Trim()
+    if ($sccmServer -and $sccmCode -and $sccmPath -and $sccmName) {
+      $cmd += " -SCCMImport"
+      $cmd += " -SCCMServer `"$sccmServer`""
+      $cmd += " -SCCMSiteCode `"$sccmCode`""
+      $cmd += " -SCCMPackagePath `"$sccmPath`""
+      $cmd += " -SCCMPackageName `"$($sccmName -replace '"', '`"')`""
+      if ($sccmVer)     { $cmd += " -SCCMVersion `"$sccmVer`"" }
+      if ($sccmComment) { $cmd += " -SCCMComment `"$($sccmComment -replace '"', '`"')`"" }
+      if ($sccmPkgID -and $RadSCCMUpdate.Checked) { $cmd += " -SCCMPackageID `"$sccmPkgID`"" }
+      if ($ChkSCCMUpdateDPs.Checked) { $cmd += " -SCCMUpdateDPs" }
+      $sccmDPGroup = Get-SelectedSCCMDPGroup
+      if ($sccmDPGroup -and $sccmDPGroup -ne "<None>") { $cmd += " -SCCMDPGroup `"$($sccmDPGroup -replace '"', '`"')`"" }
+    }
+  }
+
   $cmd += " -Unattended"
   return @{ Cmd = $cmd; SelectedCodes = $selCodes; Preview = $out }
 }
@@ -3398,6 +3774,7 @@ $Script:RunClick = {
   $Script:IsPatchSCCM      = $false
   $Script:PatchSCCMContext  = $null
   $Script:SCCMFailReason    = ""
+  $Script:SCCMDPGroupFailReason = $null
 
   # Switch button to "Running" state immediately
   $LblRunText.Text       = "Running..."
@@ -3508,6 +3885,7 @@ $Script:RunClick = {
         Server        = $TxtSCCMServer.Text.Trim()
         PackagePath   = $TxtSCCMPath.Text.Trim()
         UpdateDPs     = $ChkSCCMUpdateDPs.Checked
+        DPGroup       = Get-SelectedSCCMDPGroup
       }
 
       # Pass OutputPath as the Output\ folder - WimWizard auto-names the WIM there.
@@ -3638,6 +4016,7 @@ $Script:RunClick = {
               if ($ctx.CreateNew) {
                 $newPkg = New-CMOperatingSystemImage -Name $ctx.NewPkgName -Path $newPkgWimPath -ErrorAction Stop
                 if ($ctx.UpdateDPs) { $newPkg | Update-CMDistributionPoint -ErrorAction SilentlyContinue }
+                Add-SCCMPackageToDPGroup -PackageID $newPkg.PackageID -DPGroupName $ctx.DPGroup -WimPath $newPkgWimPath
               } else {
                 if ($ctx.NewPkgName) {
                   Set-CMOperatingSystemImage -Id $ctx.PkgID -Path $destWim -NewName $ctx.NewPkgName -ErrorAction Stop
@@ -3645,6 +4024,7 @@ $Script:RunClick = {
                   Set-CMOperatingSystemImage -Id $ctx.PkgID -Path $destWim -ErrorAction Stop
                 }
                 if ($ctx.UpdateDPs) { Get-CMOperatingSystemImage -Id $ctx.PkgID | Update-CMDistributionPoint -ErrorAction SilentlyContinue }
+                Add-SCCMPackageToDPGroup -PackageID $ctx.PkgID -DPGroupName $ctx.DPGroup -WimPath $destWim
               }
               Pop-Location
             } catch {
@@ -3674,6 +4054,9 @@ $Script:RunClick = {
           $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(0, 160, 70)
           if ($sccmFailed) {
             $LblCompleteSCCM.Text    = [char]0x26A0 + "  SCCM update failed: $Script:SCCMFailReason"
+            $LblCompleteSCCM.Visible = $true
+          } elseif ($Script:SCCMDPGroupFailReason) {
+            $LblCompleteSCCM.Text    = [char]0x26A0 + "  Package updated, but DP group assignment failed: $Script:SCCMDPGroupFailReason"
             $LblCompleteSCCM.Visible = $true
           } else {
             $LblCompleteSCCM.Visible = $false
@@ -3816,6 +4199,8 @@ $Script:RunClick = {
       if ($sccmComment) { $argList += "-SCCMComment `"$($sccmComment -replace '"', '`"')`"" }
       if ($sccmPkgID -and $RadSCCMUpdate.Checked) { $argList += "-SCCMPackageID `"$sccmPkgID`"" }
       if ($ChkSCCMUpdateDPs.Checked) { $argList += "-SCCMUpdateDPs" }
+      $sccmDPGroup = Get-SelectedSCCMDPGroup
+      if ($sccmDPGroup -and $sccmDPGroup -ne "<None>") { $argList += "-SCCMDPGroup `"$($sccmDPGroup -replace '"', '`"')`"" }
     }
   }
 
@@ -3859,13 +4244,13 @@ $Script:RunClick = {
       $exitCode  = $Script:BuildProc.ExitCode
       $succeeded = ($exitCode -eq 0)
 
-      # Write last built WIM path to registry and pre-populate SCCM tab
+      # Pre-populate the SCCM tab's Manual Import field with the WIM just built,
+      # for convenience within this session only. Per request, this is never
+      # persisted to the registry or restored on next launch - "Import WIM
+      # manually" should always start empty.
       $sccmFailed = $false
       if ($succeeded) {
         $builtWimPath = $Script:BuiltWimPath
-        if (Test-Path $RegPath) {
-          Set-ItemProperty $RegPath -Name "SCCM_LastBuiltWim" -Value $builtWimPath -ErrorAction SilentlyContinue
-        }
         if ($TxtSCCMWimPath) { $TxtSCCMWimPath.Text = $builtWimPath }
 
         # Note: if -SCCMImport was passed to the engine, it already ran the import
@@ -3952,8 +4337,22 @@ $Form.Add_Shown({
   # Apply Skip Languages visual state if it was saved as checked
   Update-LangSkipState
   Update-AppxSkipState
-  $Script:SettingsSnapshot = Get-SettingsSnapshot
   Update-UI
+
+  # Auto-connect to SCCM if a server and site code were previously saved, so the
+  # Distribution point group dropdown is correctly prefilled with the saved
+  # selection on launch rather than only after the user manually clicks Connect.
+  # Only attempted when the CM module is actually present - otherwise this would
+  # fail loudly and pointlessly on every launch for users without the console.
+  if ($Script:SCCMModuleAvailable -and $TxtSCCMServer.Text.Trim() -and $TxtSCCMSiteCode.Text.Trim()) {
+    Invoke-SCCMConnect | Out-Null
+  }
+
+  # Snapshot taken AFTER auto-connect so restoring the saved DP group (which
+  # changes $CmbSCCMDPGroup.SelectedItem from the "Not connected" placeholder to
+  # the real saved name) doesn't look like an unsaved change and trigger a
+  # spurious "Save settings?" prompt on close when nothing was actually changed.
+  $Script:SettingsSnapshot = Get-SettingsSnapshot
 
   # Create standard working folders if they don't exist
   foreach ($folder in @("ISO-Source", "Updates", "Output")) {
