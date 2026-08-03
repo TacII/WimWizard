@@ -17,7 +17,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 ## Features
 
 - **Full image build** — Services a Windows 11 Enterprise WIM from a source ISO: language packs, FOD packages, cumulative updates (.NET, SafeOS/WinRE), and Appx removal
-- **SCCM/MECM integration** — Automatically imports the finished WIM into SCCM as an OS Image package after a successful build. Supports creating new packages or updating an existing one by Package ID. Full CLI parameter support for scheduled tasks
+- **SCCM/MECM integration** — Automatically imports the finished WIM into SCCM as an OS Image package after a successful build. Supports creating new packages or updating an existing one by Package ID and/or update distribtion points. Full CLI parameter support for scheduled tasks. 
 - **Microsoft-documented servicing sequence** — WinRE is patched before `install.wim`; LCU is applied twice (pass 1 SSU, pass 2 full) around language pack injection, following [Microsoft's media dynamic update sequence](https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update)
 - **Inbox app language fix** — Automatically generates and injects a RunOnce script into the Default User profile that reinstalls kept apps via winget at first user logon. This triggers the AppX framework to download the correct language satellites for the user's locale — no task sequence steps required
 - **Patch mode** — Patches an existing serviced WIM with the latest updates only, skipping ISO/LP steps. Ideal for monthly Patch Tuesday cycles
