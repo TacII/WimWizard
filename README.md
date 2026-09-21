@@ -28,7 +28,8 @@ Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 - **Registry persistence** — GUI saves all selections (languages, apps, options) to the registry and restores them on next launch
 - **Completion screen** — GUI minimizes while the build runs, restores and shows a completion screen when done
 - **ISO version probe** — GUI reads the Windows ISO at startup (from filename or by mounting) to display the real build number in the filename preview
-
+- **26H2 support** - Wim Wizard supports Windows 26H2, tested! 
+- **Driver injection** - GUI lets you browse and select drivers to inject into your ISO. Folders can be selected with parameter as well. 
 ---
 
 ## Requirements
