@@ -14,11 +14,504 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.5.9
+  Version : 2.12.3
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.12.3 Change: grew the default window from 780x620 to 780x670 (and the
+         Options tab's usable height from 449 to 499px, in both the initial
+         layout and the SCCM/Help-tab resize handler's "restore defaults"
+         branch) so all four Servicing options checkboxes fit without
+         needing 2.12.2's scrollbar. $TabOpts.AutoScroll stays set from
+         2.12.2 as a no-cost safety net - it only shows a scrollbar if
+         content actually overflows the visible area, so with the extra
+         50px of headroom it now does nothing visible, but protects against
+         the same class of bug if another option is ever added here.
+         $PanelBottom is Dock="Bottom" and everything in it (Command
+         preview, Run button) is positioned relative to that panel, not the
+         Form, so none of it needed touching - it just moved down with the
+         taller window automatically.
+  2.12.2 Fix: the "Skip inbox app language fix" checkbox (2.9.6) and its
+         description label - the 4th and last control in the Options tab's
+         Servicing options block - never appeared, on any version since it
+         was added, regardless of window state. Not a Visible flag, a
+         z-order overlap, or a stale build - it's genuinely there in the
+         code, just positioned outside its own tab page's visible client
+         area: the block's bottom edge lands at y~450, but $TabOpts's
+         usable height (bounded by $Tabs.Size = 449, minus the tab-header
+         strip) is only ~420-425px. A control placed past that boundary is
+         never drawn - WinForms doesn't clip it with a visible cutoff or
+         raise any error, it's simply outside the container's client
+         rectangle, which reads as "nothing there" rather than "something's
+         wrong". The first three checkboxes' rows all land inside that
+         boundary, which is why exactly one - always the same one - was
+         ever missing. Fixed by setting $TabOpts.AutoScroll = $true right
+         after the tab is created, so a scrollbar appears once content
+         exceeds the visible height instead of the overflow silently not
+         rendering. Scoped to $TabOpts alone - no other tab is tall enough
+         for this to change anything there.
+  2.12.1 Fix: Run could crash mid-build with "Cannot bind argument to
+         parameter 'Path' because it is an empty string" (from
+         WimWizard.ps1's Step 4/4, unhandled - see its 5.6.1 entry). Root
+         cause was here, not in WimWizard.ps1: $TxtOutput.Tag flips to
+         "manual" from its TextChanged handler whenever $Form.Focused or
+         $TxtOutput.Focused is true - which can happen from a programmatic
+         refresh (Update-UI re-syncing the auto-generated preview), not just
+         real typing. When that happened while $TxtOutput.Text still held a
+         bare filename with no folder (Get-FilenamePreview's return value -
+         a bare name by design, see 2.10.1), both Build-CommandString and
+         the real Run handler treat Tag "manual" as "use the field's text
+         as-is" and skip the Join-Path step that normally anchors it to
+         "$ScriptRoot\Output" - so a bare name went straight through as
+         -OutputPath. First reported right after checking the "Skip inbox
+         app language fix" switch, but that switch is unrelated: any
+         checkbox change calls Update-UI, so any of them could have
+         triggered the same Tag flip - this one just happened to be the
+         one in hand when it did. Fixed by anchoring $out to
+         "$ScriptRoot\Output" whenever it isn't already a rooted path,
+         right before it's used, in both places - independent of how Tag
+         got set. The $TxtOutput.Tag "manual" heuristic itself is left as
+         is for now (untouched, not confirmed as the only possible trigger
+         without a live WinForms repro); flagged in devlog as worth
+         revisiting if this recurs.
+  2.12.0 New: Multiple-Windows-ISO disambiguation popup. Previously, if the
+         source folder held more than one Windows OS ISO for the same
+         architecture (e.g. an old ISO left behind after downloading a
+         newer build), Start-ISOProbe's background job silently picked
+         whichever one Get-ChildItem happened to enumerate first - with no
+         indication to the user of which one, and a real risk of that pick
+         being a stale/partial/corrupt leftover that hangs or fails the
+         mount (reported as the probe spinner running "forever"). Added
+         Resolve-WindowsISOChoices, which splits Windows-type ISOs
+         (LP/language ISOs still excluded) into x64/arm64 buckets and, when
+         a bucket has more than one candidate, shows a new modal picker
+         (Select-WindowsISO - "Multiple Windows ISOs Found", each ISO shown
+         as a row with size and last-modified date, newest first) instead
+         of guessing. The choice is cached per architecture, keyed to a
+         signature (path+size+modified time) of the candidate set, so
+         re-probing an unchanged folder (Refresh, retyping the same path)
+         does not re-prompt, while adding/removing/replacing a candidate
+         invalidates the cache and asks again - directly addressing the
+         "forgot an old ISO was still in the folder" scenario. Cancelling
+         falls back to the previous first-match behavior without caching.
+         The resolved x64 pick is passed straight into the probe job
+         (skipping its own re-guessing), and the resolved pick for whichever
+         architecture is actually selected (Get-ActiveWimWizardArch) is now
+         passed to the real build and to the command-line preview via a new
+         -WindowsISOPath argument (WimWizard.ps1 5.6.0) - without this, the
+         preview could reflect one ISO while the actual CLI build (which
+         does its own independent auto-detection) silently mounted another.
+  2.11.0 New: Windows Insider Preview ISO detection. Update-ISOStatus and
+         Update-ArchPanel's Windows-ISO filename patterns now explicitly
+         include "insiderpreview", matching aka.ms Insider ISOs named
+         Windows11_InsiderPreview_Client_x64_en-us_<build>_<rev>.iso.
+         These filenames happened to already pass the existing
+         win.*11.*ent pattern (the word "client" contains "ent"), so
+         detection technically worked before - but only by accident, and
+         only for filenames containing "client"; a Cloud/Server-channel
+         Insider ISO without that word would have been missed. This adds
+         an explicit, intentional rule instead of relying on the
+         coincidence. No change needed to the ISO probe job itself (it
+         already derives build/edition from the mounted WIM's real
+         version, not the filename) or to build-number-to-version mapping
+         (26300+ already resolves to 26H2 per the existing boundaries).
+         Help tab quick-start text updated with the Insider Preview
+         filename pattern.
+  2.10.1 Fix: the 2.10.0 disk space warning never appeared for the
+         auto-generated output name - only after browsing for the output
+         file and clicking Save. Get-FilenamePreview returns a bare
+         filename with no directory, so Get-FreeSpaceGB couldn't resolve a
+         real folder for it and silently returned $null. Get-FreeSpaceGB
+         now falls back to "$ScriptRoot\Output" (the same default
+         WimWizard.ps1 itself uses when -OutputPath is omitted) for a bare
+         filename. Also, Update-UI now calls Update-DiskSpaceWarning
+         directly right after syncing the preview into $TxtOutput, instead
+         of relying solely on $TxtOutput's TextChanged event - which never
+         fires when the auto-generated name happens to be unchanged from
+         the last check (e.g. re-verifying the same source folder), so the
+         check previously could go stale even once it started working.
+         Net effect: the warning now shows as soon as the source ISO is
+         verified and the filename is generated, not just after a manual
+         Browse + Save.
+  2.10.0 New: Live disk space warning under the output path field on the
+         Options tab, matching WimWizard.ps1 5.4.0's -OutputPath check.
+         Get-FreeSpaceGB (identical logic to the script's copy - local
+         drive letters via Get-PSDrive, UNC/other paths via
+         System.IO.DriveInfo against the nearest existing ancestor folder)
+         and Update-DiskSpaceWarning added; the latter is wired into
+         $TxtOutput's existing TextChanged handler so it re-evaluates on
+         every path change - Browse dialog selection, manual typing, and
+         the auto-generated filename preview alike - without a separate
+         event. Warning text uses $ColWarn (amber/orange) and stays hidden
+         whenever 30 GB or more are free or the free space can't be
+         determined. Purely a UI cue; WimWizard.ps1 does the same check
+         again on its own before the build starts regardless of how it was
+         launched.
+  2.9.6  New: "Skip inbox app language fix" checkbox added to the Options tab
+         (-SkipInboxAppLanguageFix), alongside the existing Skip updates/Skip
+         lang packs/Skip Appx removal switches - same persistence, patch-mode
+         disable, and command-line wiring as those three. Matches the
+         corresponding WimWizard.ps1 5.3.4 change. Disabled (greyed, and
+         excluded from the command line even if previously checked) whenever
+         Skip lang packs is checked, via the same Update-LangSkipState handler
+         that already greys the language checkboxes - the fix is a no-op with
+         no language pack applied, so there is nothing for the checkbox to do
+         in that state. Help tab's TAB: OPTIONS section extended with an
+         explanation of what the underlying fix does and why it's normally on.
+  2.9.5  Fix: checking "Skip Appx removal" on the Options tab produced a
+         build that ended instantly with no WIM created and no visible
+         error. Root cause: the Run handler added -SkipAppxRemoval to the
+         command line twice - once because $checkedPkgs.Count was 0 (all
+         app checkboxes are force-unchecked by Update-AppxSkipState when
+         the box is checked), and again from a separate
+         `if ($ChkSkipAppx.Checked)` line further down. PowerShell's
+         parameter binder rejects a switch specified twice ("parameter ...
+         specified more than once"), so the elevated `& WimWizard.ps1 ...`
+         call failed before the script's pipeline ever started. Manually
+         unchecking every app instead of using the checkbox only hit the
+         first code path once, which is why that workaround produced a
+         WIM. Removed the redundant second addition; the checkbox now
+         always resolves to a single -SkipAppxRemoval on the command line.
+  2.9.4  Text: removed the grey hint label below the Replace/Create radios
+         on the Patch WIM tab entirely (it went through a couple of
+         reword attempts in 2.9.1/2.9.3 and still wasn't landing). The two
+         radio buttons and their enable/disable logic when switching
+         between SCCM package and local file source are unchanged - only
+         the label and its two ForeColor-toggle lines (one per source
+         selection) are gone. The scope explanation (Package Name and the
+         Action radios only apply to an SCCM source) still lives in the
+         Help tab's TAB: PATCH WIM section.
+  2.9.3  Text: removed the unnecessary parenthetical from the Help tab's
+         Enable patch mode entry (2.9.2) - the point was already made
+         clearly enough without it.
+         Text: reworded the Patch WIM tab's own on-screen hint below the
+         Replace/Create radios. Old text - "Click > Run. Action and
+         Package Name apply to SCCM source only." - had an orphaned "Click
+         > Run" fragment unrelated to the rest of the sentence, and called
+         the radio buttons "Action" (a word that appears nowhere as a
+         visible label). New: "Package Name and these radio buttons only
+         apply to an SCCM package source - ignored for a local WIM file."
+         Label height 16->32 to allow the longer text to wrap; confirmed
+         against the section's already-generous 231px allocated height
+         that there's no overflow risk.
+  2.9.2  Fix: the new TAB: PATCH WIM help text (2.9.1) incorrectly claimed
+         "Skip updates still works" in patch mode. Checked against the
+         actual code: $ChkPatchMode's CheckedChanged handler disables
+         $ChkSkipUpdates in the same loop as SkipLPs and SkipAppx - all
+         three are forced off together, none are patch-mode exceptions.
+         Corrected, and noted why that's the sensible behavior rather than
+         a limitation: patch mode's only job is applying updates, so
+         skipping them there would leave nothing for it to do.
+  2.9.1  New: "TAB: PATCH WIM" section added to the GUI's own Help tab -
+         Enable patch mode, the SCCM-package-vs-local-file source choice
+         (including the live Package ID verification behavior), Package
+         Name / Output path fields with their {Date} tokens, and the
+         Replace/Create action radios (SCCM-source only). Positioned
+         between SCCM and FIRST-TIME SETUP, matching actual tab order.
+         Fix: the existing "MONTHLY PATCHING" quick-start section was
+         stale - it described patch mode as a checkbox on the Options tab
+         ("Check 'Patch existing image'"), which predates the dedicated
+         Patch WIM tab added several versions ago. Updated to reference
+         the actual current workflow.
+  2.9.0  New: "TAB: DRIVERS" section added to the GUI's own Help tab -
+         Driver folder field, Scan Folder (including the refresh/merge
+         behavior), Show selected drivers (grid columns, the four selection
+         buttons and the 32/64-bit heuristic caveat), and the registry+XML
+         persistence behavior, plus the same "special circumstances" tool
+         recommendation as the Drivers tab's own tip label. Positioned
+         between FEATURES ON DEMAND and SCCM, matching actual tab order.
+         Was previously undocumented entirely - the Help tab hadn't been
+         touched since the driver feature was added several versions ago.
+         Note: found in the process that TAB: PATCH WIM has no Help section
+         either - a pre-existing gap, unrelated to drivers, not addressed
+         here since it wasn't what was asked about.
+  2.8.8  New: tip label added 5px below the hint text - "Tip! Only install
+         drivers for special circumstances this way. Otherwise use tools
+         like Driver Automation Toolkit, Lenovo Commercial Vantage, Dell DCU
+         or HPIA." Italic, small font, subdued color.
+         Fix: driver folder textbox moved down 2px (Y 82->84 relative to
+         its old position) - text was still overlapping the label above it.
+         Every control below shifted down to make room for the new tip
+         label (LblDriverPath 62->97, textbox/browse button 82->119,
+         Scan Folder/Show selected drivers buttons 118->155, summary label
+         152->189).
+  2.8.7  Fix: "Exception calling 'ContainsKey' ... Key cannot be null"
+         crashed the console, reported after aborting a build mid-run and
+         re-launching the GUI. New-DriverDataTable called
+         $PreviousInclude.ContainsKey($r.InfPath) unconditionally - if any
+         scanned driver row had a null/empty InfPath, that throws instead of
+         just evaluating false. Root cause of HOW a row ends up with a null
+         InfPath was NOT conclusively identified - Get-DriverFolderScan's
+         normal paths (success and per-file parse-failure fallback) both
+         always set InfPath from Get-ChildItem's FullName, which shouldn't
+         be null under normal enumeration. Hardened defensively at three
+         layers regardless, since the exact trigger couldn't be reproduced
+         to confirm: (1) Get-DriverFolderScan now skips any Get-ChildItem
+         result with no FullName: (2) New-DriverDataTable now skips any row
+         with no InfPath entirely, rather than adding it or crashing on the
+         ContainsKey check; (3) the "Scan Folder" button's call to
+         New-DriverDataTable - previously NOT wrapped in try/catch, unlike
+         the Get-DriverFolderScan call right above it - now is, so any
+         future exception here shows a message box instead of an
+         unhandled error dump in the console.
+  2.8.6  Text: "Import drivers" button renamed to "Scan Folder"; the driver
+         review grid's "Close" button renamed to "OK". The "not imported
+         yet" summary label's reference to the button by name updated to
+         match.
+  2.8.5  Fix: driver grid rows (and column headers) read as visually
+         cropped - default DataGridView row height put text right at the
+         cell edge even though the window had vertical space to spare.
+         RowTemplate.Height set to 26 (from the .NET default, ~22) and
+         ColumnHeadersHeight to 30 with HeightSizeMode "DisableResizing",
+         set before DataSource is assigned so bound rows pick up the new
+         height correctly.
+  2.8.4  Fix: Test-Is64BitDriver only checked the Path column, never
+         FileName - so a driver with the architecture baked into its
+         filename instead of a folder (e.g. "rtu52cx22x64sta.INF", "x64"
+         mid-name, path just a vendor GUID folder) was never caught by
+         "Uncheck all 64-bit drivers". 32-bit detection already checked
+         both (Path for "Win32", FileName for a "*32.inf" suffix) - 64-bit
+         now also checks FileName, as a plain substring match (not a suffix
+         rule, since the reported example has "x64" mid-filename rather
+         than at the end).
+  2.8.3  Fix: bulk selection changes in the driver review grid (Check all /
+         Uncheck all / Uncheck all 32-bit / Uncheck all 64-bit) took ~22
+         seconds on a 695-row list, with no visual feedback that anything
+         was happening. Two causes, both fixed:
+         1. $grid.AutoSizeColumnsMode was left running as "AllCells"
+            continuously - every single row's Include change triggered a
+            full re-measurement of every cell in every row to decide if
+            columns needed to resize, effectively O(n) work per toggle for
+            n toggles. Now runs "AllCells" only once (an explicit
+            AutoResizeColumns call in Add_Shown) to get the initial content-
+            based layout, then freezes to AutoSizeColumnsMode "None" -
+            columns stay a fixed width from then on.
+         2. Each row's Include assignment individually notified the bound
+            DataGridView. New Invoke-DriverBulkEdit wrapper calls
+            $Script:DriverTable.BeginLoadData()/EndLoadData() around the
+            edit loop, suppressing per-row change notifications so the
+            whole batch applies as one update.
+         Also addresses the missing progress feedback: Invoke-DriverBulkEdit
+         sets a wait cursor and disables the four selection buttons for the
+         duration (forcing a DoEvents() first so the cursor actually paints
+         before work starts), and re-enables them when done. With both
+         fixes the operation itself should now be near-instant for
+         hundreds of rows, but the wait-cursor treatment is kept regardless
+         as a safety net for larger or slower (e.g. very large network-
+         backed) driver lists.
+  2.8.2  Fix: Test-Is64BitDriver/Test-Is32BitDriver (2.8.0) required the
+         architecture marker to be a whole path segment (bounded by "\" or
+         the string edges), so it missed the common real-world case where
+         the marker is embedded inside a larger folder name instead of
+         being its own segment - e.g. "Windows 11 23H2-x64-20240807" as a
+         single folder contains "x64" but isn't the segment "x64". Reported
+         as "Uncheck all 64-bit drivers" not catching rows whose only "x64"
+         appeared that way; it only caught the few rows with a literal
+         "\x64" folder of their own. Reverted to plain substring "contains"
+         matching, which is what was actually requested originally - trades
+         a small amount of false-positive risk (e.g. a folder literally
+         named "x64Legacy") for actually catching the common layout.
+  2.8.1  Fix: startup was noticeably slower after the driver-persistence
+         changes. Restore-DriverSelectionFromXml (2.7.0) ran unconditionally
+         in Form.Add_Shown - a real Get-ChildItem -Recurse folder scan
+         against the saved driver path, which delayed the window becoming
+         interactive even for users who never open the Drivers tab that
+         session, and could be genuinely slow against a large or UNC/DFS
+         share. Deferred to the first time the Drivers tab is actually
+         selected instead, via $Tabs.Add_SelectedIndexChanged (already used
+         for the SCCM tab's resize logic) - $Script:DriverRestoreDone
+         ensures it only runs once per session. Wait cursor shown for the
+         duration since it's still a synchronous scan, just no longer an
+         unconditional one.
+  2.8.0  New: "Uncheck all 32-bit drivers" / "Uncheck all 64-bit drivers"
+         buttons in the review grid. Heuristic, not foolproof (a driver in a
+         folder that doesn't follow either naming convention won't be
+         caught): 32-bit = a "Win32" folder segment in Path OR a filename
+         ending "32.inf"; 64-bit = a "Winx64", "x64", or "Win64" folder
+         segment in Path (matched against whole path segments, not a bare
+         substring, so e.g. a folder literally named "x64Legacy" doesn't
+         false-positive on "x64"). New Test-Is32BitDriver/Test-Is64BitDriver
+         helpers.
+         Fix: Get-DriverInfFileInfo (GUI copy) showed vendor comment text
+         appended to Version (e.g. "23.110.0.5 ;DATE HAS TO BE IN FOLLOWING
+         FORMAT MM/DD/YYYY") - some driver INFs put a reminder comment right
+         on the DriverVer line, and INF syntax treats ";" as a comment to
+         end of line even mid-line, but the field-capture regex read to end
+         of line unconditionally. New Remove-InfComment helper strips
+         everything from the first ";" onward; applied to Provider, Class,
+         DriverVer, and [Strings] values. Same fix applied to WimWizard.ps1
+         5.3.2's Get-InfDriverInfo in the same session.
+  2.7.3  Fix: driver Include selection could be silently lost, restoring the
+         full "everything checked" state instead of the user's actual
+         selection on the next launch. Root cause: Get-SettingsSnapshot only
+         tracked $TxtDriverPath.Text, not the per-driver Include selection -
+         so unchecking drivers with the folder path unchanged never
+         registered as an "unsaved change", the exit-time save prompt never
+         fired, Save-Settings (and therefore the XML export) never ran, and
+         whatever stale WimWizard-DriverList.xml was already on disk (e.g.
+         the all-checked state written right after the initial import) is
+         what got restored next launch - reported as "selected 8 of 130,
+         exited, reopened to 130 selected".
+         Fix has two parts:
+         1. New Save-DriverPersistence (registry DriverPath + XML together)
+            is now called directly when the driver review grid closes
+            (Add_FormClosing, which fires before the grid control is torn
+            down) - the selection is persisted the moment the user finishes
+            editing it, rather than depending on the app-exit prompt at all.
+            $grid.EndEdit() is called first to flush a checkbox edit that
+            may still be "in progress" if the very last click before closing
+            was on a checkbox cell.
+         2. Get-SettingsSnapshot now also hashes the current Include
+            selection (sorted, semicolon-joined InfPaths), not just the
+            path, as a second line of defense so the exit-prompt correctly
+            detects selection-only changes too.
+         Save-Settings itself simplified to call Save-DriverPersistence
+         instead of duplicating the registry-write + XML-export lines.
+  2.7.2  Text: "Show imported drivers" button renamed to "Show selected
+         drivers" - more accurate, since the button opens the review grid
+         for the current Include selection rather than performing an import.
+  2.7.1  Fix: three issues found testing 2.7.0 against a real DFS driver repo
+         (\\concordiabus.local\DFS\dist$\SCCM\Drivers):
+         1. Driver folder Browse button replaced the SaveFileDialog-as-
+            folder-picker trick with a real "Select Folder" dialog (native
+            Vista+ IFileDialog/FOS_PICKFOLDERS via COM interop, new
+            Show-FolderPicker/[WimWizard.NativeFolderDialog] type) - no more
+            confusing native "File name: Select folder here.THIS_IS_A_..."/
+            "Save as type: Folder (*.THIS_IS_A_FOLDER_PICKER)" labels, which
+            are OS dialog chrome the old approach couldn't relabel or hide.
+            Still supports typing/navigating UNC and DFS paths, same as
+            Explorer. CAVEAT: this COM interop is a well-known, stable
+            Windows API pattern but has NOT been executed/verified in the
+            dev environment (no Windows host available to test against) -
+            Show-FolderPicker catches any interop failure and transparently
+            falls back to the old SaveFileDialog trick, so a bug here
+            degrades gracefully instead of breaking the Browse button.
+         2. Fix: the grid's "Path" column always showed "." instead of the
+            actual relative folder (e.g. "PRO1000\Winx64\W11"). Root cause:
+            Get-DriverFolderScan computed the prefix to strip from
+            Resolve-Path's output rather than the literal input path -
+            Resolve-Path can canonicalize a DFS namespace path to a
+            different string (e.g. its underlying target-server path) than
+            what Get-ChildItem's .FullName uses for enumerated children
+            (always literally built from the exact -LiteralPath string
+            passed in), so the prefix never matched and every row fell
+            through to the "." fallback. Fixed by stripping the literal
+            input path instead of Resolve-Path's version.
+         3. Fix: driver folder textbox (height 24) and Browse button (height
+            26, 1px Y offset) had mismatched heights/alignment, which read
+            as minor clipping next to each other. Both now height 22 at the
+            same Y, matching the $TxtSource/$BtnBrowseSrc convention used
+            elsewhere in the file.
+  2.7.0  Change: Drivers tab refined per user feedback after testing 2.6.1:
+         1. Fixed clipping - the hint label's two lines of bold 9pt text
+            didn't fit its allotted height, visually crowding "Driver
+            folder..." below it. Hint label height 34->48, textbox height
+            22->24, and every control below shifted down to match.
+         2. Manufacturer showed raw INF string tokens like "%Intel%" instead
+            of the resolved name. Many driver INFs write Provider=%Intel%
+            where %Intel% is defined in that file's own [Strings] section
+            (e.g. Intel = "Intel Corporation"). Added Get-InfStringsTable/
+            Resolve-InfToken (GUI-local copy, same fix applied to
+            WimWizard.ps1 5.3.1's Get-InfDriverInfo in the same session) -
+            resolves the token to the real string, or strips the percent
+            signs if the INF defines no matching entry.
+         3. Summary text changed from "x of x drivers selected" to "x of x
+            drivers will be imported into the image", shown in green
+            (FromArgb 90,200,110) when at least one driver is queued; stays
+            grey for the zero-selected or not-yet-imported states.
+         4. The driver grid popup is now borderless (FormBorderStyle=None,
+            so no native title bar and therefore no minimize/close buttons
+            either) with a custom accent-colored draggable header bar
+            standing in for the title bar, Escape-to-close, and a slightly
+            lighter background (FromArgb 58,58,61 vs the main window's
+            40,40,40) with a thin accent-colored frame so it visually stands
+            out as a distinct floating panel rather than blending into the
+            main window.
+         5. Driver folder path now persists to the registry (DriverPath
+            under the existing Save-Settings/Load-Settings mechanism) and
+            the selected drivers persist to WimWizard-DriverList.xml, which
+            now also records the SourcePath it was generated from. On
+            startup, Restore-DriverSelectionFromXml re-scans the
+            registry-restored path and restores the saved Include selection
+            ONLY if the XML's SourcePath still matches - pointing at a
+            different folder correctly leaves the old (unrelated) selection
+            alone rather than misapplying it. Drivers not listed in the
+            saved XML default to unchecked on cold-start restore (the export
+            only ever records the checked set, so "not listed" could mean
+            unchecked-last-time or new-since-last-save; defaulting to
+            unchecked never silently re-includes something the user
+            excluded), which is the opposite default used during a live
+            re-import via "Import drivers" (new-since-last-scan defaults to
+            checked there, since that's a same-session discovery rather than
+            a cold-start guess). New-DriverDataTable takes a
+            -DefaultForUnlisted switch to select between the two.
+         6. Added a "Path" grid column (the driver's folder relative to the
+            import root, excluding the root itself) so drivers under
+            different subfolders (e.g. per hardware model) are
+            distinguishable at a glance. Grid popup widened to 1080px and
+            AutoSizeColumnsMode changed from "Fill" to "AllCells" so columns
+            size to their content and a horizontal scrollbar appears once
+            the total width exceeds the visible area - expected given long
+            driver paths, not a layout bug.
+  2.6.1  Fix: New-DriverDataTable (added in 2.6.0) returned its DataTable via
+         a bare "return $table". DataTable implements IEnumerable, so
+         PowerShell's pipeline auto-unrolled it into individual DataRow
+         objects on return - $Script:DriverTable ended up being a single
+         DataRow (one driver found) or an array of DataRow (multiple drivers)
+         instead of the DataTable itself. Symptoms: "[System.Data.DataRow]
+         does not contain a method named 'Select'" and "Cannot index into a
+         null array" (.Rows on a DataRow returns $null), and the grid window
+         showed no drivers. Fixed with the unary comma operator ("return
+         ,$table") which prevents the enumeration.
+         Change: Drivers tab reworked per user feedback after testing 2.6.0:
+         - Path field relabelled "Driver folder (local or UNC path):" - the
+           SaveFileDialog-as-folder-picker trick was never a UNC requirement,
+           just a more capable dialog than FolderBrowserDialog; the old label
+           wrongly implied UNC was mandatory.
+         - Split the single "Show imported drivers" button into two: "Import
+           drivers" (always enabled, scans/re-scans the folder - doubles as a
+           refresh if more drivers are added to it later) and "Show imported
+           drivers" (grey/disabled until at least one import has completed,
+           now only opens the review grid - no longer scans).
+         - Re-importing preserves existing Include checkbox state per INF
+           path (via a previous-selection lookup passed into
+           New-DriverDataTable) - only newly-discovered drivers default to
+           checked, so refreshing after adding drivers to the folder doesn't
+           silently reset a prior selection.
+         - Typing directly into the path field (not just Browse) now also
+           invalidates a stale import via a new TextChanged handler.
+  2.6.0  New: Drivers tab (full build only, matches WimWizard.ps1 5.3.0's
+         -DriverPath/-DriverListPath). UNC-safe folder picker (SaveFileDialog
+         trick, same as -SCCMPackagePath - FolderBrowserDialog can't navigate
+         UNC paths reliably) plus a "Show imported drivers" button that opens
+         a DataGridView window listing every .inf found (Manufacturer/Class/
+         Version/Date, parsed from each INF's [Version] section - no DISM or
+         mount required) with a per-row Include checkbox, Check all/Uncheck
+         all, and Close. Selection state persists in $Script:DriverTable
+         across reopening the grid (re-scans only happen when the folder path
+         changes) and across build attempts.
+         Pagination was deliberately left out - a plain DataGridView handles
+         a single OEM driver pack's typical 100-300 INFs natively; revisit
+         only if real multi-model scans show it's needed.
+         Build wiring: never opened the grid -> passes -DriverPath directly
+         (inject everything found, same as the CLI default). Opened the grid
+         with at least one driver checked -> exports the checked subset to
+         WimWizard-DriverList.xml and passes -DriverListPath instead (same
+         export-then-reference pattern as the existing Appx XML export).
+         Opened the grid and unchecked every driver -> explicit "inject none",
+         omits both args. Preview command builder updated to match exactly.
+         Patch WIM tab's build path was not touched - drivers remain
+         full-build only, consistent with WimWizard.ps1 forcing them off in
+         patch mode.
+         INF-parsing logic is duplicated between this file and
+         WimWizard.ps1 (same duplication pattern already used for
+         Get-EditionFromBuild in 2.5.9) since there's no shared module to
+         dot-source from cleanly - a change to one does NOT automatically
+         apply to the other.
+         Tab numbering shifted: SCCM is now Tab 6 (was 5), Patch WIM is now
+         Tab 7 (was 6), Help is now Tab 8 (was 7). No functional change to
+         those tabs, only their position after the new Drivers tab.
   2.5.9  Fix: ISO probe job (background job started when a source folder is
          selected) hardcoded the detected "edition" (the version string used
          in the filename preview, e.g. "25H2") to '25H2' for any non-LTSC
@@ -502,8 +995,10 @@ function Save-Settings {
     Set-ItemProperty $RegPath -Name "SkipLPs"    -Value 0
   }
   Set-ItemProperty $RegPath -Name "SkipAppx"     -Value ([int]$ChkSkipAppx.Checked)
+  Set-ItemProperty $RegPath -Name "SkipInboxAppFix" -Value ([int]$ChkSkipInboxAppFix.Checked)
   $selFoDs  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key }) -join ","
   Set-ItemProperty $RegPath -Name "FoDs"             -Value $selFoDs
+  Save-DriverPersistence
   # SCCM tab settings
   Set-ItemProperty $RegPath -Name "SCCM_Server"      -Value $TxtSCCMServer.Text
   Set-ItemProperty $RegPath -Name "SCCM_SiteCode"    -Value $TxtSCCMSiteCode.Text
@@ -546,12 +1041,14 @@ function Load-Settings {
     if ($reg.PSObject.Properties["SkipUpdates"])  { $ChkSkipUpdates.Checked = [bool]$reg.SkipUpdates }
     if ($reg.PSObject.Properties["SkipLPs"])      { $ChkSkipLPs.Checked     = [bool]$reg.SkipLPs     }
     if ($reg.PSObject.Properties["SkipAppx"])     { $ChkSkipAppx.Checked    = [bool]$reg.SkipAppx    }
+    if ($reg.PSObject.Properties["SkipInboxAppFix"]) { $ChkSkipInboxAppFix.Checked = [bool]$reg.SkipInboxAppFix }
     if ($reg.PSObject.Properties["FoDs"]) {
       foreach ($cb in $FoDCheckboxes.Values) { $cb.Checked = $false }
       foreach ($key in $reg.FoDs.Split(",")) {
         if ($key -and $FoDCheckboxes.ContainsKey($key)) { $FoDCheckboxes[$key].Checked = $true }
       }
     }
+    if ($reg.PSObject.Properties["DriverPath"] -and $reg.DriverPath) { $TxtDriverPath.Text = $reg.DriverPath }
     # SCCM tab settings
     if ($reg.PSObject.Properties["SCCM_Server"])       { $TxtSCCMServer.Text        = $reg.SCCM_Server }
     if ($reg.PSObject.Properties["SCCM_SiteCode"])     { $TxtSCCMSiteCode.Text      = $reg.SCCM_SiteCode }
@@ -681,7 +1178,10 @@ $Script:EditionTag      = '25H2'   # Updated by ISO probe: '25H2', 'LTSC2024', e
 $Script:EditionIndexMap = @{}        # Maps ComboBox item position -> WIM index number
 $Script:HasX64   = $false   # x64 Windows ISO found in source folder
 $Script:HasArm64 = $false   # arm64 Windows ISO found in source folder
+$Script:ChosenWinISO          = @{ x64 = $null; arm64 = $null }  # User's pick when >1 Windows ISO exists for that arch
+$Script:ChosenWinISOSignature = @{ x64 = $null; arm64 = $null }  # Fingerprint of the candidate set the pick was made against - invalidated (re-prompts) if it changes
 $Script:SavedLangState = @{}  # Saved checkbox states when Skip Languages is active
+$Script:MinFreeSpaceGB = 30   # Minimum recommended free space at the output path
 
 
 # -- Colours and fonts ----------------------------------------------------------
@@ -707,6 +1207,278 @@ function New-DarkCheckbox {
   $cb.Font  = $FontMain
   $cb.AutoSize  = $true
   return $cb
+}
+
+# -- Driver INF parsing (GUI-local copy) ---------------------------------------
+# Duplicated from WimWizard.ps1's Get-InfDriverInfo/Get-DriverInfoFromFolder -
+# same duplication pattern already used for Get-EditionFromBuild (see 2.5.9
+# changelog): the GUI needs to preview/select drivers without invoking the
+# core engine, and there's no shared module to dot-source from cleanly.
+# If the parsing logic here ever changes, WimWizard.ps1's copy needs the same
+# fix - they are NOT automatically kept in sync.
+
+# INF files commonly write Provider=%Intel% rather than a literal string,
+# where %Intel% is a token defined in that same file's own [Strings] section
+# (e.g. Intel = "Intel Corporation"). Resolves the token to the real string
+# instead of displaying the raw "%Intel%" syntax in the grid.
+function Get-InfStringsTable {
+  param([Parameter(Mandatory)][string]$Content)
+  $strings = @{}
+  if ($Content -match '(?ms)^\[Strings\](.*?)(?:^\[|\z)') {
+    foreach ($line in ($Matches[1] -split "`r?`n")) {
+      if ($line -match '^\s*([A-Za-z0-9_.]+)\s*=\s*"?([^"\r\n]*)"?\s*$') {
+        $strings[$Matches[1]] = Remove-InfComment $Matches[2].Trim()
+      }
+    }
+  }
+  return $strings
+}
+
+# INF syntax treats ";" as a comment marker running to end of line, even mid-
+# line after real data (some vendors leave a reminder comment right on the
+# DriverVer line, e.g. "DriverVer=01/02/2025,23.110.0.5 ;DATE HAS TO BE IN
+# FOLLOWING FORMAT MM/DD/YYYY"). The field-capture regexes below read to end
+# of line unconditionally, so without this the comment text gets
+# concatenated onto the captured value. Strips from the first ";" onward.
+function Remove-InfComment {
+  param([string]$Value)
+  if (-not $Value) { return $Value }
+  $idx = $Value.IndexOf(';')
+  if ($idx -ge 0) { return $Value.Substring(0, $idx).Trim() }
+  return $Value.Trim()
+}
+
+function Resolve-InfToken {
+  param([string]$Value, [hashtable]$Strings)
+  if (-not $Value) { return $Value }
+  if ($Value -match '^%(.+)%$') {
+    $token = $Matches[1]
+    foreach ($key in $Strings.Keys) {
+      if ($key -ieq $token) { return $Strings[$key] }
+    }
+    # No matching [Strings] entry (e.g. a built-in Windows token this INF
+    # doesn't redefine locally) - strip the percent signs rather than
+    # showing the raw %token% syntax.
+    return $token
+  }
+  return $Value
+}
+
+function Get-DriverInfFileInfo {
+  param([Parameter(Mandatory)][string]$InfPath)
+
+  $content = Get-Content -LiteralPath $InfPath -Raw -ErrorAction Stop
+  $stringsTable = Get-InfStringsTable -Content $content
+
+  $versionBlock = if ($content -match '(?ms)^\[Version\](.*?)(?:^\[|\z)') {
+    $Matches[1]
+  } else {
+    $content
+  }
+
+  $provider  = if ($versionBlock -match '(?im)^\s*Provider\s*=\s*(.+?)\s*$')  { Remove-InfComment ($Matches[1].Trim('"', ' ')) } else { "" }
+  $class     = if ($versionBlock -match '(?im)^\s*Class\s*=\s*(.+?)\s*$')     { Remove-InfComment ($Matches[1].Trim('"', ' ')) } else { "" }
+  $driverVer = if ($versionBlock -match '(?im)^\s*DriverVer\s*=\s*(.+?)\s*$') { Remove-InfComment ($Matches[1].Trim()) } else { "" }
+
+  $provider = Resolve-InfToken -Value $provider -Strings $stringsTable
+  $class    = Resolve-InfToken -Value $class    -Strings $stringsTable
+
+  $date = ""; $version = ""
+  if ($driverVer -match '^([\d/]+)\s*,\s*(.+)$') {
+    $date    = $Matches[1]
+    $version = $Matches[2]
+  } elseif ($driverVer) {
+    $version = $driverVer
+  }
+
+  $classLabels = @{
+    'Net' = 'Network'; 'HDC' = 'Storage controller'; 'System' = 'System device'
+    'Display' = 'Display / GPU'; 'Media' = 'Audio / media'; 'Monitor' = 'Monitor'
+    'Battery' = 'Battery / ACPI'; 'USB' = 'USB controller'; 'Bluetooth' = 'Bluetooth'
+    'SmartCardReader' = 'Smart card reader'
+  }
+  $classLabel = if ($class -and $classLabels.ContainsKey($class)) { $classLabels[$class] } else { $class }
+
+  [PSCustomObject]@{
+    InfPath = $InfPath; FileName = Split-Path $InfPath -Leaf
+    Manufacturer = $provider; Class = $classLabel; Version = $version; Date = $date
+  }
+}
+
+function Get-DriverFolderScan {
+  param([Parameter(Mandatory)][string]$Root)
+  if (-not (Test-Path -LiteralPath $Root)) { throw "Driver path not found: $Root" }
+  # Use the literal input path (trimmed of any trailing slash) as the prefix
+  # to strip, NOT Resolve-Path's output. Get-ChildItem's .FullName for every
+  # enumerated child is always built by literally appending onto whatever
+  # string was passed to -LiteralPath - but Resolve-Path can return a
+  # DIFFERENT (canonicalized) string for the same folder, e.g. a DFS
+  # namespace path can resolve to its underlying target-server path. Using
+  # Resolve-Path's version as the prefix meant it never actually matched
+  # $dir's prefix, so every driver fell through to the "." fallback below -
+  # this is what a DFS-backed driver repo hit in testing.
+  $rootFull = $Root.TrimEnd('\', '/')
+  Get-ChildItem -LiteralPath $Root -Recurse -Filter *.inf -ErrorAction Stop | ForEach-Object {
+    # Defensive: skip anything Get-ChildItem returned without a usable
+    # FullName (e.g. a file that was deleted/moved mid-enumeration - not
+    # normally expected, but reported once after an aborted build left the
+    # folder in an unclear state; skipping here plus the same guard in
+    # New-DriverDataTable means this can no longer crash the scan either way).
+    if (-not $_.FullName) { return }
+    $info = try {
+      Get-DriverInfFileInfo -InfPath $_.FullName
+    } catch {
+      [PSCustomObject]@{ InfPath = $_.FullName; FileName = $_.Name; Manufacturer = "?"; Class = "(parse error)"; Version = ""; Date = "" }
+    }
+    # Folder path relative to the import root, excluding the root itself -
+    # shown as its own grid column so drivers under different subfolders
+    # (e.g. per hardware model) are distinguishable at a glance.
+    $dir = Split-Path -Path $_.FullName -Parent
+    $relPath = if ($dir.Length -gt $rootFull.Length -and $dir.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $dir.Substring($rootFull.Length).TrimStart('\', '/')
+    } else { "" }
+    if (-not $relPath) { $relPath = "." }
+    $info | Add-Member -NotePropertyName RelPath -NotePropertyValue $relPath -Force
+    $info
+  }
+}
+
+# -- Native "Select Folder" dialog ----------------------------------------------
+# Gives a real "Select Folder" picker with a proper title and OK button,
+# instead of the SaveFileDialog-as-folder-picker trick's native "File name:"/
+# "Save as type:" labels (which the .NET API can't relabel or hide - they're
+# OS dialog chrome, not app content). Uses the Vista+ IFileDialog COM API
+# with FOS_PICKFOLDERS, which supports typing/navigating UNC and DFS paths
+# the same as Explorer itself.
+#
+# CAVEAT: this is a widely-published PowerShell/COM interop pattern and the
+# Windows API surface involved (IFileOpenDialog/IShellItem) has been stable
+# since Vista, but it has NOT been executed/verified in this environment -
+# there's no Windows host available to test it against. If SHCreateItemFromParsingName,
+# the vtable ordering, or marshaling is wrong in some edge case, ShowDialog
+# throws and Show-FolderPicker below catches that and transparently falls
+# back to the old (uglier but proven-working) SaveFileDialog trick, so a bug
+# here degrades gracefully rather than breaking the Browse button outright.
+if (-not ("WimWizard.NativeFolderDialog" -as [type])) {
+  Add-Type -Language CSharp -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace WimWizard {
+    [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")]
+    internal class FileOpenDialogRCW { }
+
+    [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IFileOpenDialog {
+        [PreserveSig] uint Show(IntPtr parent);
+        void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+        void SetFileTypeIndex(uint iFileType);
+        void GetFileTypeIndex(out uint piFileType);
+        void Advise(IntPtr pfde, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOptions(uint fos);
+        void GetOptions(out uint fos);
+        void SetDefaultFolder(IShellItem psi);
+        void SetFolder(IShellItem psi);
+        void GetFolder(out IShellItem ppsi);
+        void GetCurrentSelection(out IShellItem ppsi);
+        void SetFileName(string pszName);
+        void GetFileName(out string pszName);
+        void SetTitle(string pszTitle);
+        void SetOkButtonLabel(string pszText);
+        void SetFileNameLabel(string pszLabel);
+        void GetResult(out IShellItem ppsi);
+        void AddPlace(IShellItem psi, uint alignment);
+        void SetDefaultExtension(string pszDefaultExtension);
+        void Close(int hr);
+        void SetClientGuid(ref Guid guid);
+        void ClearClientData();
+        void SetFilter(IntPtr pFilter);
+        void GetResults(out IntPtr ppenum);
+        void GetSelectedItems(out IntPtr ppsai);
+    }
+
+    [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IShellItem {
+        void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(int sigdnName, out IntPtr ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
+    }
+
+    public static class NativeFolderDialog {
+        private const uint FOS_PICKFOLDERS = 0x00000020;
+        private const uint FOS_FORCEFILESYSTEM = 0x00000040;
+        private const int SIGDN_FILESYSPATH = unchecked((int)0x80058000);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        private static extern void SHCreateItemFromParsingName(
+            [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+            IntPtr pbc,
+            [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
+            out IShellItem ppv);
+
+        private static readonly Guid IID_IShellItem = new Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+
+        // Returns the selected folder path, or null if the user cancelled.
+        public static string ShowDialog(string title, string initialPath) {
+            IFileOpenDialog dialog = (IFileOpenDialog)new FileOpenDialogRCW();
+            try {
+                dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+                if (!string.IsNullOrEmpty(title)) dialog.SetTitle(title);
+                if (!string.IsNullOrEmpty(initialPath)) {
+                    try {
+                        IShellItem folder;
+                        SHCreateItemFromParsingName(initialPath, IntPtr.Zero, IID_IShellItem, out folder);
+                        if (folder != null) dialog.SetFolder(folder);
+                    } catch {
+                        // Initial path doesn't exist/isn't reachable right now -
+                        // not fatal, just open at the dialog's default location.
+                    }
+                }
+                uint hr = dialog.Show(IntPtr.Zero);
+                if (hr != 0) return null;   // user cancelled
+                IShellItem result;
+                dialog.GetResult(out result);
+                IntPtr pszPath;
+                result.GetDisplayName(SIGDN_FILESYSPATH, out pszPath);
+                try {
+                    return Marshal.PtrToStringUni(pszPath);
+                } finally {
+                    Marshal.FreeCoTaskMem(pszPath);
+                }
+            } finally {
+                Marshal.ReleaseComObject(dialog);
+            }
+        }
+    }
+}
+"@
+}
+
+function Show-FolderPicker {
+  param([string]$Title, [string]$InitialPath)
+  try {
+    return [WimWizard.NativeFolderDialog]::ShowDialog($Title, $InitialPath)
+  } catch {
+    # COM interop failed - fall back to the SaveFileDialog-as-folder-picker
+    # trick. Less clean (native "File name:"/"Save as type:" labels can't be
+    # hidden), but it's the previously-proven-working method, so the Browse
+    # button still functions even if the native picker above has a bug.
+    $dlg = New-Object System.Windows.Forms.SaveFileDialog
+    $dlg.Title           = $Title
+    $dlg.Filter          = "Folder Selection|*.this-is-a-folder"
+    $dlg.FileName        = "Select Folder"
+    $dlg.ValidateNames   = $false
+    $dlg.CheckFileExists = $false
+    $dlg.CheckPathExists = $false
+    if ($InitialPath -and (Test-Path -LiteralPath $InitialPath -ErrorAction SilentlyContinue)) { $dlg.InitialDirectory = $InitialPath }
+    if ($dlg.ShowDialog() -eq "OK") {
+      return [System.IO.Path]::GetDirectoryName($dlg.FileName)
+    }
+    return $null
+  }
 }
 
 # -- Helper: short edition tag from selected ComboBox item name ---------------
@@ -747,7 +1519,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.5.9"
+$WimWizardVersion = "2.12.3"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -774,7 +1546,7 @@ $_btnImage  = [System.Drawing.Image]::FromStream($_btnStream)
 # -- Main form ------------------------------------------------------------------
 $Form  = New-Object System.Windows.Forms.Form
 $Form.Text  = "WIM Wizard v$ScriptVer / v$WimWizardVersion  -  A tribute to WIM Witch"
-$Form.Size  = New-Object System.Drawing.Size(780, 620)
+$Form.Size  = New-Object System.Drawing.Size(780, 670)
 $Form.MinimumSize  = $Form.Size
 $Form.StartPosition  = "CenterScreen"
 $Form.BackColor  = $ColBg
@@ -973,7 +1745,7 @@ $PicIcon.Add_Click({
 # Tab control
 $Tabs  = New-Object System.Windows.Forms.TabControl
 $Tabs.Location  = New-Object System.Drawing.Point(10, 62)
-$Tabs.Size  = New-Object System.Drawing.Size(742, 449)
+$Tabs.Size  = New-Object System.Drawing.Size(742, 499)
 $Tabs.BackColor  = $ColPanel
 $Tabs.Font  = $FontMain
 $Form.Controls.Add($Tabs)
@@ -994,6 +1766,17 @@ function New-Tab {
 # TAB 3 - OPTIONS
 # ==============================================================================
 $TabOpts = New-Tab "  Options"
+# AutoScroll: the Servicing options block (4 checkboxes + their description
+# labels, added below) runs its content down to y~450, but $Tabs.Size (449
+# total, minus the tab-header strip) only gives this page roughly 420-425px
+# of usable client height. Without AutoScroll, a control positioned past
+# that edge is never drawn - no error, no visual cutoff line, it's simply
+# outside the page's client rectangle - which is why "Skip inbox app
+# language fix" (the last control added, so the first to fall outside) never
+# appeared even though it's fully present in the code. AutoScroll only adds
+# a scrollbar when content actually exceeds the visible area, so this is a
+# no-op on every other tab.
+$TabOpts.AutoScroll = $true
 
 function New-OptionLabel {
   param([string]$Text, [int]$Y)
@@ -1055,6 +1838,161 @@ $BtnRefreshSrc.FlatStyle = "Flat"
 $TabOpts.Controls.Add($BtnRefreshSrc)
 $BtnRefreshSrc.Add_Click({ Start-ISOProbe })
 
+# Modal picker shown when more than one Windows OS ISO (same architecture)
+# exists in the source folder - e.g. an old ISO left behind after a newer
+# one was downloaded. Returns the chosen [System.IO.FileInfo], or $null if
+# the user cancelled. Rows are sorted newest-first since the most likely
+# intent is "use the ISO I just downloaded".
+function Select-WindowsISO {
+  param(
+    [Parameter(Mandatory)][object[]]$Candidates,
+    [string]$ArchLabel = ""
+  )
+
+  $sorted = @($Candidates | Sort-Object LastWriteTime -Descending)
+
+  $dlg = New-Object System.Windows.Forms.Form
+  $dlg.Text            = "Multiple Windows ISOs Found"
+  $dlg.FormBorderStyle = "FixedDialog"
+  $dlg.MaximizeBox     = $false
+  $dlg.MinimizeBox     = $false
+  $dlg.StartPosition   = "CenterParent"
+  $dlg.ClientSize      = New-Object System.Drawing.Size(580, 340)
+  $dlg.BackColor       = $ColBg
+  $dlg.ForeColor       = $ColFg
+  $dlg.Font            = $FontMain
+
+  $archSuffix = if ($ArchLabel) { " ($ArchLabel)" } else { "" }
+  $lbl = New-Object System.Windows.Forms.Label
+  $lbl.Text      = "Multiple Windows ISOs found in source folder$archSuffix, please choose one:"
+  $lbl.Location  = New-Object System.Drawing.Point(12, 12)
+  $lbl.Size      = New-Object System.Drawing.Size(556, 36)
+  $lbl.ForeColor = $ColFg
+  $lbl.Font      = $FontBold
+  $dlg.Controls.Add($lbl)
+
+  $list = New-Object System.Windows.Forms.ListBox
+  $list.Location      = New-Object System.Drawing.Point(12, 52)
+  $list.Size          = New-Object System.Drawing.Size(556, 234)
+  $list.BackColor     = [System.Drawing.Color]::FromArgb(55, 55, 55)
+  $list.ForeColor     = $ColFg
+  $list.BorderStyle   = "FixedSingle"
+  $list.IntegralHeight = $false
+  $list.Font          = $FontMain
+  foreach ($iso in $sorted) {
+    $sizeGB = [math]::Round($iso.Length / 1GB, 1)
+    $list.Items.Add("$($iso.Name)   [$sizeGB GB - modified $($iso.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))]") | Out-Null
+  }
+  $list.SelectedIndex = 0
+  $list.Add_DoubleClick({ $dlg.DialogResult = "OK"; $dlg.Close() })
+  $dlg.Controls.Add($list)
+
+  $btnOK = New-Object System.Windows.Forms.Button
+  $btnOK.Text         = "Use selected"
+  $btnOK.Location     = New-Object System.Drawing.Point(372, 298)
+  $btnOK.Size         = New-Object System.Drawing.Size(100, 26)
+  $btnOK.BackColor    = $ColAccent
+  $btnOK.ForeColor    = $ColFg
+  $btnOK.FlatStyle    = "Flat"
+  $btnOK.DialogResult = "OK"
+  $dlg.Controls.Add($btnOK)
+  $dlg.AcceptButton = $btnOK
+
+  $btnCancel = New-Object System.Windows.Forms.Button
+  $btnCancel.Text         = "Cancel"
+  $btnCancel.Location     = New-Object System.Drawing.Point(478, 298)
+  $btnCancel.Size         = New-Object System.Drawing.Size(90, 26)
+  $btnCancel.BackColor    = [System.Drawing.Color]::FromArgb(60, 60, 60)
+  $btnCancel.ForeColor    = $ColFg
+  $btnCancel.FlatStyle    = "Flat"
+  $btnCancel.DialogResult = "Cancel"
+  $dlg.Controls.Add($btnCancel)
+  $dlg.CancelButton = $btnCancel
+
+  $result = $dlg.ShowDialog($Form)
+  $dlg.Dispose()
+  if ($result -eq "OK" -and $list.SelectedIndex -ge 0) {
+    return $sorted[$list.SelectedIndex]
+  }
+  return $null
+}
+
+# Scans the source folder for Windows OS ISOs (LP/language ISOs excluded,
+# same filter as Update-ISOStatus/Update-ArchPanel), split by architecture.
+# When an architecture has more than one candidate, prompts via
+# Select-WindowsISO rather than silently guessing - the previous behavior
+# (pick the first match, in whatever order the filesystem returns) meant an
+# old ISO left in the folder after downloading a newer one could get built
+# instead, or a corrupt/partial leftover file could hang the probe/mount
+# indefinitely. The choice is cached per architecture and keyed to a
+# signature of the candidate set (path+size+modified time), so re-probing
+# the same unchanged folder (Refresh, a no-op edit to the path, etc.) does
+# not re-prompt; adding, removing, or replacing a candidate ISO changes the
+# signature and prompts again. Returns @{ x64 = <FileInfo|$null>; arm64 = <FileInfo|$null> }.
+function Resolve-WindowsISOChoices {
+  param([string]$Folder)
+
+  $choice = @{ x64 = $null; arm64 = $null }
+  if (-not $Folder -or -not (Test-Path $Folder -PathType Container)) { return $choice }
+
+  $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
+               Where-Object {
+                 $_.Extension -match '^\.iso$' -and
+                 $_.Name -notmatch 'langpack|language.?pack|lang_pack|_lp_'
+               })
+  if ($winISOs.Count -eq 0) { return $choice }
+
+  foreach ($arch in @('x64', 'arm64')) {
+    $bucket = if ($arch -eq 'arm64') {
+      @($winISOs | Where-Object { $_.Name -match 'arm64' })
+    } else {
+      @($winISOs | Where-Object { $_.Name -notmatch 'arm64' })
+    }
+    if ($bucket.Count -eq 0) { continue }
+    if ($bucket.Count -eq 1) { $choice[$arch] = $bucket[0]; continue }
+
+    $signature = ($bucket | Sort-Object FullName | ForEach-Object {
+      "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)"
+    }) -join ';'
+
+    if ($Script:ChosenWinISO[$arch] -and $Script:ChosenWinISOSignature[$arch] -eq $signature) {
+      $choice[$arch] = $Script:ChosenWinISO[$arch]
+      continue
+    }
+
+    $archLabel = if ($arch -eq 'arm64') { 'ARM64' } else { 'x64' }
+    $picked = Select-WindowsISO -Candidates $bucket -ArchLabel $archLabel
+    if ($picked) {
+      $Script:ChosenWinISO[$arch]          = $picked
+      $Script:ChosenWinISOSignature[$arch] = $signature
+      $choice[$arch] = $picked
+    } else {
+      # Cancelled - fall back to the previous default (first match) without
+      # caching, so the next probe (e.g. Refresh) asks again rather than
+      # silently locking in a choice the user explicitly declined to make.
+      $choice[$arch] = $bucket[0]
+    }
+  }
+  return $choice
+}
+
+# Which architecture the current build actually targets - mirrors the same
+# condition used everywhere else (-ARM64 switch, LP arch filter, etc.).
+function Get-ActiveWimWizardArch {
+  if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { return 'arm64' }
+  return 'x64'
+}
+
+# Full path of the specific Windows ISO the user picked via Select-WindowsISO
+# for the currently active architecture, or $null when there was no
+# ambiguity to resolve (single candidate - CLI auto-detection is unambiguous
+# and needs no override).
+function Get-ChosenWindowsISOPath {
+  $arch = Get-ActiveWimWizardArch
+  if ($Script:ChosenWinISO[$arch]) { return $Script:ChosenWinISO[$arch].FullName }
+  return $null
+}
+
 # Probe function - extracts build string from ISO, called at startup and on Refresh
 function Start-ISOProbe {
   # Cancel any existing probe job
@@ -1068,6 +2006,13 @@ function Start-ISOProbe {
     $Script:ProbeTimer = $null
   }
 
+  $probeFolder = $TxtSource.Text
+
+  # Resolve (and, if needed, prompt for) which specific Windows ISO to use
+  # per architecture BEFORE showing the spinner - this is a modal dialog and
+  # should not appear to hang behind a spinning "probing..." indicator.
+  $isoChoice = Resolve-WindowsISOChoices -Folder $probeFolder
+
   # Show "probing..." in preview while job runs, show spinner
   $Script:BuildString = '26200.xxxx'
   $Script:EditionTag  = '25H2'
@@ -1080,9 +2025,13 @@ function Start-ISOProbe {
   $LblRunText.Visible = $false
   Update-UI
 
-  $probeFolder = $TxtSource.Text
+  # The probe always reads build/edition off the x64 ISO (both architectures
+  # share the same build number) - see the "probe x64" comment inside the
+  # job below. Pass the resolved path through explicitly so the job doesn't
+  # need to (again) guess when more than one x64 candidate exists.
+  $probeChosenX64Path = if ($isoChoice.x64) { $isoChoice.x64.FullName } else { $null }
   $Script:ProbeJob = Start-Job -ScriptBlock {
-    param($Folder)
+    param($Folder, $ChosenX64Path)
 
     # Maps a build number to the Windows 11 version string, using the same
     # boundaries as Get-CatalogSearchTerms in WimWizard.ps1 (kept in sync -
@@ -1106,12 +2055,18 @@ function Start-ISOProbe {
     if (-not (Test-Path $Folder)) { return 'WIMWIZ:26200.xxxx|25H2' }
     $isoPath = $null
     try {
-      $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
-                   Where-Object { $_.Extension -match '^\.iso$' -and $_.Name -notmatch 'LangPack|Language|InboxApps' })
-      if ($winISOs.Count -eq 0) { return 'WIMWIZ:26200.xxxx|25H2' }
-      # When both x64 and arm64 ISOs are present, probe x64 (same build number)
-      $probeISO = $winISOs | Where-Object { $_.Name -notmatch 'arm64' } | Select-Object -First 1
-      if (-not $probeISO) { $probeISO = $winISOs[0] }
+      if ($ChosenX64Path -and (Test-Path $ChosenX64Path)) {
+        # Caller (Resolve-WindowsISOChoices) already disambiguated - use it
+        # directly rather than re-scanning and re-guessing here.
+        $probeISO = Get-Item -LiteralPath $ChosenX64Path -ErrorAction Stop
+      } else {
+        $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Extension -match '^\.iso$' -and $_.Name -notmatch 'LangPack|Language|InboxApps' })
+        if ($winISOs.Count -eq 0) { return 'WIMWIZ:26200.xxxx|25H2' }
+        # When both x64 and arm64 ISOs are present, probe x64 (same build number)
+        $probeISO = $winISOs | Where-Object { $_.Name -notmatch 'arm64' } | Select-Object -First 1
+        if (-not $probeISO) { $probeISO = $winISOs[0] }
+      }
       $isoName = $probeISO.Name
 
       $isLtsc = $isoName -match 'ltsc'
@@ -1160,7 +2115,7 @@ function Start-ISOProbe {
       if ($isoPath) { try { Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null } catch {} }
       return 'WIMWIZ:26200.xxxx|25H2'
     }
-  } -ArgumentList $probeFolder
+  } -ArgumentList $probeFolder, $probeChosenX64Path
 
   $Script:ProbeTimer = New-Object System.Windows.Forms.Timer
   $Script:ProbeTimer.Interval = 1000
@@ -1280,7 +2235,7 @@ function Update-ISOStatus {
       if ($n -match 'langpack|language.?pack|lang_pack|_lp_') {
         $lpIsArm64 = $n -match 'arm64'
         if ($lpIsArm64 -eq $wantArm64LP) { $lpFound = $true }
-      } elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc') { $winFound = $true }
+      } elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc|insiderpreview') { $winFound = $true }
     }
   } elseif ($folder -match '^[A-Za-z]:\\' -and $folder -notmatch '^[Cc]:\\') {
     # Folder not found - check if it's a mapped drive missing in elevated session
@@ -1386,7 +2341,7 @@ function Update-ArchPanel {
       $n = $iso.Name.ToLower()
       if ($n -match 'langpack|language.?pack|lang_pack|_lp_') { continue }
       if ($n -match 'arm64') { $Script:HasArm64 = $true }
-      elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc') { $Script:HasX64 = $true }
+      elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc|insiderpreview') { $Script:HasX64 = $true }
     }
   }
   $both = $Script:HasX64 -and $Script:HasArm64
@@ -1474,6 +2429,16 @@ $LblOutHint.Location  = New-Object System.Drawing.Point(8, ($y + 2))
 $LblOutHint.AutoSize  = $true
 $TabOpts.Controls.Add($LblOutHint)
 
+$y += 16
+$LblDiskSpace  = New-Object System.Windows.Forms.Label
+$LblDiskSpace.Text  = ""
+$LblDiskSpace.Font  = $FontSmall
+$LblDiskSpace.ForeColor = $ColWarn
+$LblDiskSpace.Location  = New-Object System.Drawing.Point(8, ($y + 2))
+$LblDiskSpace.AutoSize  = $true
+$LblDiskSpace.Visible   = $false
+$TabOpts.Controls.Add($LblDiskSpace)
+
 # Separator
 $y += 28
 $Sep2 = New-Object System.Windows.Forms.Panel
@@ -1512,6 +2477,13 @@ $ChkSkipAppx.Location = New-Object System.Drawing.Point(8, $y)
 $ChkSkipAppx.Width  = 400
 $TabOpts.Controls.Add($ChkSkipAppx)
 $TabOpts.Controls.Add((New-OptionLabel "Do not remove any provisioned Appx packages." $y))
+
+$y += 45
+$ChkSkipInboxAppFix = New-DarkCheckbox -Text "Skip inbox app language fix  (-SkipInboxAppLanguageFix)" -Checked $false
+$ChkSkipInboxAppFix.Location = New-Object System.Drawing.Point(8, $y)
+$ChkSkipInboxAppFix.Width  = 400
+$TabOpts.Controls.Add($ChkSkipInboxAppFix)
+$TabOpts.Controls.Add((New-OptionLabel "Do not reinstall kept inbox apps via winget to fix their display language." $y))
 
 $y += 45
 
@@ -1747,13 +2719,576 @@ function Update-FoDPanel {
 }
 
 # ==============================================================================
-# TAB 5 - SCCM
+# TAB 5 - DRIVERS
+# ==============================================================================
+$TabDrivers = New-Tab "  Drivers"
+
+$LblDriverHint = New-Object System.Windows.Forms.Label
+$LblDriverHint.Text      = "Inject hardware drivers into the full OS image. Point to a folder of expanded driver packages (.inf/.sys/.cat - not vendor .exe installers); subfolders are scanned automatically. Full build only - not available in Patch WIM mode."
+$LblDriverHint.Font      = $FontBold
+$LblDriverHint.ForeColor = $ColFg
+$LblDriverHint.Location  = New-Object System.Drawing.Point(6, 8)
+$LblDriverHint.Size      = New-Object System.Drawing.Size(720, 48)
+$TabDrivers.Controls.Add($LblDriverHint)
+
+$LblDriverTip = New-Object System.Windows.Forms.Label
+$LblDriverTip.Text      = "Tip! Only install drivers for special circumstances this way. Otherwise use tools like Driver Automation Toolkit, Lenovo Commercial Vantage, Dell DCU or HPIA."
+$LblDriverTip.Font      = New-Object System.Drawing.Font($FontSmall.FontFamily, $FontSmall.Size, [System.Drawing.FontStyle]::Italic)
+$LblDriverTip.ForeColor = $ColSubtext
+$LblDriverTip.Location  = New-Object System.Drawing.Point(6, 61)
+$LblDriverTip.Size      = New-Object System.Drawing.Size(720, 32)
+$TabDrivers.Controls.Add($LblDriverTip)
+
+$LblDriverPath = New-Object System.Windows.Forms.Label
+$LblDriverPath.Text      = "Driver folder (local or UNC path):"
+$LblDriverPath.Font      = $FontBold
+$LblDriverPath.ForeColor = $ColFg
+$LblDriverPath.Location  = New-Object System.Drawing.Point(6, 97)
+$LblDriverPath.AutoSize  = $true
+$TabDrivers.Controls.Add($LblDriverPath)
+
+$TxtDriverPath = New-Object System.Windows.Forms.TextBox
+$TxtDriverPath.Location  = New-Object System.Drawing.Point(6, 119)
+$TxtDriverPath.Size      = New-Object System.Drawing.Size(500, 22)
+$TxtDriverPath.BackColor = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$TxtDriverPath.ForeColor = $ColFg
+$TxtDriverPath.BorderStyle = "FixedSingle"
+$TabDrivers.Controls.Add($TxtDriverPath)
+
+$BtnBrowseDriverPath = New-Object System.Windows.Forms.Button
+$BtnBrowseDriverPath.Text      = "Browse..."
+$BtnBrowseDriverPath.Location  = New-Object System.Drawing.Point(514, 119)
+$BtnBrowseDriverPath.Size      = New-Object System.Drawing.Size(90, 22)
+$BtnBrowseDriverPath.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBrowseDriverPath.ForeColor = $ColFg
+$BtnBrowseDriverPath.FlatStyle = "Flat"
+$TabDrivers.Controls.Add($BtnBrowseDriverPath)
+$BtnBrowseDriverPath.Add_Click({
+  $selected = Show-FolderPicker -Title "Select the driver repository folder" -InitialPath $TxtDriverPath.Text
+  if ($selected) {
+    $TxtDriverPath.Text = $selected
+    # TextChanged handler (below) resets $Script:DriverTable / Show button state
+  }
+})
+
+# Any path edit - typed or browsed - invalidates a previous import, since it
+# no longer necessarily reflects what's on disk at the new location.
+$TxtDriverPath.Add_TextChanged({
+  $Script:DriverTable = $null
+  $BtnShowDrivers.Enabled = $false
+  Update-DriverSummary
+})
+
+$BtnImportDrivers = New-Object System.Windows.Forms.Button
+$BtnImportDrivers.Text      = "Scan Folder"
+$BtnImportDrivers.Location  = New-Object System.Drawing.Point(6, 155)
+$BtnImportDrivers.Size      = New-Object System.Drawing.Size(130, 26)
+$BtnImportDrivers.BackColor = $ColAccent
+$BtnImportDrivers.ForeColor = $ColFg
+$BtnImportDrivers.FlatStyle = "Flat"
+$TabDrivers.Controls.Add($BtnImportDrivers)
+
+$BtnShowDrivers = New-Object System.Windows.Forms.Button
+$BtnShowDrivers.Text      = "Show selected drivers"
+$BtnShowDrivers.Location  = New-Object System.Drawing.Point(142, 155)
+$BtnShowDrivers.Size      = New-Object System.Drawing.Size(180, 26)
+$BtnShowDrivers.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnShowDrivers.ForeColor = $ColSubtext
+$BtnShowDrivers.FlatStyle = "Flat"
+$BtnShowDrivers.Enabled   = $false   # greyed out until an import has run
+$TabDrivers.Controls.Add($BtnShowDrivers)
+
+$LblDriverSummary = New-Object System.Windows.Forms.Label
+$LblDriverSummary.Text      = "No drivers imported yet."
+$LblDriverSummary.Font      = $FontSmall
+$LblDriverSummary.ForeColor = $ColSubtext
+$LblDriverSummary.Location  = New-Object System.Drawing.Point(6, 189)
+$LblDriverSummary.Size      = New-Object System.Drawing.Size(710, 18)
+$TabDrivers.Controls.Add($LblDriverSummary)
+
+# Success-green used when drivers are queued for injection - distinct from
+# $ColSubtext (grey, "nothing imported yet") and errors/warnings elsewhere.
+$ColDriverSuccess = [System.Drawing.Color]::FromArgb(90, 200, 110)
+
+# $Script:DriverTable holds the scanned drivers as a DataTable once at least
+# one import has run; Include column reflects the user's selection. Null
+# means "never imported" - in that case a build uses -DriverPath directly
+# (inject everything found), matching -DriverPath's CLI behaviour.
+$Script:DriverTable = $null
+
+function Update-DriverSummary {
+  if (-not $Script:DriverTable) {
+    $LblDriverSummary.Text = if ($TxtDriverPath.Text.Trim()) { "Not imported yet - click 'Scan Folder', or build as-is to inject everything found in the folder." } else { "No drivers imported yet." }
+    $LblDriverSummary.ForeColor = $ColSubtext
+    $BtnShowDrivers.ForeColor = $ColSubtext
+    return
+  }
+  $total = $Script:DriverTable.Rows.Count
+  $incl  = @($Script:DriverTable.Select("Include = true")).Count
+  $LblDriverSummary.Text = "$incl of $total drivers will be imported into the image"
+  # Green only when something is actually queued - zero selected is still
+  # a valid state (explicit "inject none"), not a success state to highlight.
+  $LblDriverSummary.ForeColor = if ($incl -gt 0) { $ColDriverSuccess } else { $ColSubtext }
+  $BtnShowDrivers.ForeColor = if ($BtnShowDrivers.Enabled) { $ColFg } else { $ColSubtext }
+}
+
+# Heuristic architecture detection - NOT foolproof (a driver could be placed
+# in a folder that doesn't follow either convention). Plain substring
+# "contains" matching, per spec - deliberately NOT restricted to whole path
+# segments, since real-world driver packs commonly embed the marker inside a
+# larger folder name (e.g. "Windows 11 23H2-x64-20240807") rather than as
+# its own segment. This does mean a folder like "x64Legacy" would also
+# match - an accepted tradeoff for catching the common case, same as the
+# stated 32-bit filename heuristic (*32.inf) isn't foolproof either.
+function Test-Is32BitDriver {
+  param($Row)
+  $path  = [string]$Row["Path"]
+  $fname = [string]$Row["FileName"]
+  if ($path -match 'Win32') { return $true }
+  if ($fname -match '32\.inf$') { return $true }
+  return $false
+}
+
+function Test-Is64BitDriver {
+  param($Row)
+  $path  = [string]$Row["Path"]
+  $fname = [string]$Row["FileName"]
+  if ($path -match 'Winx64|x64|Win64') { return $true }
+  # Some vendors bake the architecture into the filename instead of a folder
+  # (e.g. "rtu52cx22x64sta.INF") - "x64" appears mid-name here, not as a
+  # suffix, so this is a plain substring check like the path check above,
+  # not a "*64.inf" suffix rule (that wouldn't have matched this example).
+  if ($fname -match 'Winx64|x64|Win64') { return $true }
+  return $false
+}
+
+function New-DriverDataTable {
+  param([array]$Rows, [hashtable]$PreviousInclude, [bool]$DefaultForUnlisted = $true)
+  $table = New-Object System.Data.DataTable
+  [void]$table.Columns.Add("Include", [bool])
+  [void]$table.Columns.Add("Manufacturer", [string])
+  [void]$table.Columns.Add("Class", [string])
+  [void]$table.Columns.Add("Version", [string])
+  [void]$table.Columns.Add("Date", [string])
+  [void]$table.Columns.Add("Path", [string])
+  [void]$table.Columns.Add("FileName", [string])
+  [void]$table.Columns.Add("InfPath", [string])
+  foreach ($r in $Rows) {
+    # Defensive: skip anything without a usable InfPath rather than crashing
+    # on ContainsKey($null) below. A row like this can't be tracked for
+    # selection or passed to Add-WindowsDriver anyway, so there's nothing
+    # useful to keep - it's dropped rather than added as a broken row.
+    if (-not $r -or -not $r.InfPath) { continue }
+
+    $row = $table.NewRow()
+    # $DefaultForUnlisted controls what happens to a driver NOT found in
+    # $PreviousInclude:
+    # - Live re-import (default $true): unlisted means newly discovered
+    #   since the last import (e.g. user added drivers to the folder) -
+    #   default to checked so the user notices and can review it.
+    # - Cold-start restore from the saved XML ($false): the XML only ever
+    #   records the checked set, so "not listed" could mean either
+    #   unchecked-last-time or new - defaulting to unchecked is the safer
+    #   choice since it never silently re-includes something the user
+    #   explicitly excluded before.
+    $row["Include"] = if ($PreviousInclude -and $PreviousInclude.ContainsKey($r.InfPath)) { $PreviousInclude[$r.InfPath] } else { $DefaultForUnlisted }
+    $row["Manufacturer"] = $r.Manufacturer
+    $row["Class"]        = $r.Class
+    $row["Version"]      = $r.Version
+    $row["Date"]         = $r.Date
+    $row["Path"]         = if ($r.PSObject.Properties["RelPath"]) { $r.RelPath } else { "" }
+    $row["FileName"]     = $r.FileName
+    $row["InfPath"]      = $r.InfPath
+    [void]$table.Rows.Add($row)
+  }
+  # CRITICAL: DataTable implements IEnumerable, so a bare "return $table" gets
+  # auto-unrolled by PowerShell's pipeline into the table's individual DataRow
+  # objects - the caller ends up with a DataRow (single row) or an array of
+  # DataRow (multiple rows) instead of the DataTable itself. This is what
+  # caused "DataRow does not contain a method named 'Select'" and "Cannot
+  # index into a null array" (.Rows on a DataRow returns $null). The unary
+  # comma operator wraps the table in a single-element array so PowerShell
+  # passes it through as one object instead of enumerating it.
+  return ,$table
+}
+
+$Script:DriverListXmlPath = Join-Path $ScriptRoot "WimWizard-DriverList.xml"
+
+# Writes the current Include selection to XML, tagged with the source folder
+# it was scanned from. Called both at build time (so the build's
+# -DriverListPath and the persisted file agree) and from Save-Settings (so a
+# selection survives even if the user closes without starting a build).
+# Records the SourcePath so a later session only restores this selection if
+# the driver folder is unchanged - if the user points to a different folder,
+# the old selection is correctly treated as unrelated rather than reused.
+function Save-DriverSelectionXml {
+  if (-not $Script:DriverTable) { return $null }
+  $root = $TxtDriverPath.Text.Trim()
+  if (-not $root) { return $null }
+  $checked = @($Script:DriverTable.Select("Include = true"))
+  try {
+    $dxml = [System.Xml.XmlDocument]::new()
+    $ddec = $dxml.CreateXmlDeclaration("1.0", "UTF-8", $null)
+    $dxml.AppendChild($ddec) | Out-Null
+    $droot = $dxml.CreateElement("DriverList")
+    $droot.SetAttribute("GeneratedBy", "WimWizard-GUI")
+    $droot.SetAttribute("Date", (Get-Date -Format "yyyy-MM-dd HH:mm"))
+    $droot.SetAttribute("SourcePath", $root)
+    $droot.SetAttribute("Count", $checked.Count)
+    $dxml.AppendChild($droot) | Out-Null
+    foreach ($row in $checked) {
+      $dnode = $dxml.CreateElement("Driver")
+      $dnode.SetAttribute("InfPath", [string]$row["InfPath"])
+      $dnode.SetAttribute("FileName", [string]$row["FileName"])
+      $droot.AppendChild($dnode) | Out-Null
+    }
+    $dxml.Save($Script:DriverListXmlPath)
+    return $Script:DriverListXmlPath
+  } catch {
+    return $null
+  }
+}
+
+# Persists both halves of driver state together: the folder path to the
+# registry, and the current Include selection to XML. Called from
+# Save-Settings (build launch / exit-prompt), AND directly when the review
+# grid closes - selection changes alone (no path change) don't register in
+# Get-SettingsSnapshot's diff in every edge case, so waiting only for the
+# exit-prompt risked silently losing a selection if the user just closed the
+# grid and exited without an unrelated setting also changing.
+function Save-DriverPersistence {
+  if (-not (Test-Path $RegPath)) { New-Item $RegPath -Force | Out-Null }
+  Set-ItemProperty $RegPath -Name "DriverPath" -Value $TxtDriverPath.Text
+  Save-DriverSelectionXml | Out-Null
+}
+
+# Restores a previously-saved driver selection at startup, but only when the
+# saved XML's SourcePath still matches the current (registry-restored) driver
+# path - a different path means different drivers, so the old selection is
+# not relevant and is left alone rather than misapplied.
+function Restore-DriverSelectionFromXml {
+  $root = $TxtDriverPath.Text.Trim()
+  if (-not $root -or -not (Test-Path -LiteralPath $root)) { return }
+  if (-not (Test-Path -LiteralPath $Script:DriverListXmlPath)) { return }
+  try {
+    [xml]$savedXml = Get-Content $Script:DriverListXmlPath -ErrorAction Stop
+    $savedRoot = $savedXml.DriverList.SourcePath
+    if (-not $savedRoot -or $savedRoot -ne $root) { return }   # different folder - stale, ignore
+
+    [array]$savedNodes = $savedXml.DriverList.Driver
+    $savedIncluded = @{}
+    if ($savedNodes -and $savedNodes.Count -gt 0 -and $savedNodes[0]) {
+      foreach ($n in $savedNodes) { $savedIncluded[[string]$n.InfPath] = $true }
+    }
+
+    $found = @(Get-DriverFolderScan -Root $root)
+    if ($found.Count -eq 0) { return }
+
+    $Script:DriverTable = New-DriverDataTable -Rows $found -PreviousInclude $savedIncluded -DefaultForUnlisted $false
+    $BtnShowDrivers.Enabled = $true
+    Update-DriverSummary
+  } catch {
+    # Corrupt/unreadable XML, or the folder became unreachable since last
+    # session - fail silently, the user can just click Import to rebuild it.
+  }
+}
+
+$BtnImportDrivers.Add_Click({
+  $root = $TxtDriverPath.Text.Trim()
+  if (-not $root) {
+    [System.Windows.Forms.MessageBox]::Show("Enter or browse to a driver folder first.", "No driver folder set", "OK", "Warning") | Out-Null
+    return
+  }
+  if (-not (Test-Path -LiteralPath $root)) {
+    [System.Windows.Forms.MessageBox]::Show("Path not found:`n$root", "Driver folder not found", "OK", "Warning") | Out-Null
+    return
+  }
+
+  # Carry forward the current Include selections, keyed by InfPath, so a
+  # re-import (e.g. after adding more drivers to the folder) doesn't reset
+  # choices already made - only newly-found INFs default to checked.
+  $previousInclude = @{}
+  if ($Script:DriverTable) {
+    foreach ($r in $Script:DriverTable.Rows) { $previousInclude[[string]$r["InfPath"]] = [bool]$r["Include"] }
+  }
+
+  $Form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+  try {
+    $found = @(Get-DriverFolderScan -Root $root)
+  } catch {
+    $Form.Cursor = [System.Windows.Forms.Cursors]::Default
+    [System.Windows.Forms.MessageBox]::Show("Could not scan driver folder:`n$($_.Exception.Message)", "Scan failed", "OK", "Error") | Out-Null
+    return
+  }
+  $Form.Cursor = [System.Windows.Forms.Cursors]::Default
+
+  if ($found.Count -eq 0) {
+    $Script:DriverTable = $null
+    $BtnShowDrivers.Enabled = $false
+    Update-DriverSummary
+    [System.Windows.Forms.MessageBox]::Show("No .inf driver files found under:`n$root", "No drivers found", "OK", "Information") | Out-Null
+    return
+  }
+
+  try {
+    $Script:DriverTable = New-DriverDataTable -Rows $found -PreviousInclude $previousInclude
+  } catch {
+    $Script:DriverTable = $null
+    $BtnShowDrivers.Enabled = $false
+    Update-DriverSummary
+    [System.Windows.Forms.MessageBox]::Show("Could not build the driver list:`n$($_.Exception.Message)", "Scan failed", "OK", "Error") | Out-Null
+    return
+  }
+  $BtnShowDrivers.Enabled = $true
+  Update-DriverSummary
+})
+
+$BtnShowDrivers.Add_Click({
+  if (-not $Script:DriverTable) { return }   # button is disabled in this state, but guard anyway
+  $root = $TxtDriverPath.Text.Trim()
+
+  # Borderless (no native title bar, so no minimize/close buttons either) and
+  # deliberately lighter than the main window so it stands out as a distinct
+  # "floating" panel rather than blending into the app. The colored outer
+  # edge is a manual "frame" effect: the form itself is $ColAccent, and a
+  # slightly-inset content panel sits on top of it, leaving a few pixels of
+  # accent color visible as a border on all sides.
+  $gridForm = New-Object System.Windows.Forms.Form
+  $gridForm.FormBorderStyle = "None"
+  $gridForm.Size            = New-Object System.Drawing.Size(1080, 580)
+  $gridForm.StartPosition   = "CenterParent"
+  $gridForm.BackColor       = $ColAccent
+  $gridForm.KeyPreview      = $true
+  $gridForm.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq "Escape") { $gridForm.Close() } })
+
+  $ColDriverGridBg = [System.Drawing.Color]::FromArgb(58, 58, 61)   # slightly lighter than $ColPanel (40,40,40)
+
+  $gridContent = New-Object System.Windows.Forms.Panel
+  $gridContent.Location = New-Object System.Drawing.Point(3, 3)
+  $gridContent.Size     = New-Object System.Drawing.Size(($gridForm.Width - 6), ($gridForm.Height - 6))
+  $gridContent.Anchor   = "Top,Bottom,Left,Right"
+  $gridContent.BackColor = $ColDriverGridBg
+  $gridForm.Controls.Add($gridContent)
+
+  # Custom header bar - stands in for the native title bar (draggable, shows
+  # the source folder) since FormBorderStyle=None removes the real one.
+  $gridHeader = New-Object System.Windows.Forms.Panel
+  $gridHeader.Location  = New-Object System.Drawing.Point(0, 0)
+  $gridHeader.Size      = New-Object System.Drawing.Size($gridContent.Width, 30)
+  $gridHeader.Anchor    = "Top,Left,Right"
+  $gridHeader.BackColor = $ColAccent
+  $gridContent.Controls.Add($gridHeader)
+
+  $lblHeader = New-Object System.Windows.Forms.Label
+  $lblHeader.Text      = "Imported drivers  -  $root"
+  $lblHeader.Font      = $FontBold
+  $lblHeader.ForeColor = $ColFg
+  $lblHeader.BackColor = [System.Drawing.Color]::Transparent
+  $lblHeader.Location  = New-Object System.Drawing.Point(10, 6)
+  $lblHeader.AutoSize  = $true
+  $gridHeader.Controls.Add($lblHeader)
+
+  # Manual window dragging via the header bar - FormBorderStyle=None forms
+  # can't be dragged by Windows automatically since there's no caption area.
+  $Script:DriverGridDragging   = $false
+  $Script:DriverGridDragCursor = $null
+  $Script:DriverGridDragOrigin = $null
+  $dragStart = {
+    param($s, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+      $Script:DriverGridDragging   = $true
+      $Script:DriverGridDragCursor = [System.Windows.Forms.Cursor]::Position
+      $Script:DriverGridDragOrigin = $gridForm.Location
+    }
+  }
+  $dragMove = {
+    if ($Script:DriverGridDragging) {
+      $cur = [System.Windows.Forms.Cursor]::Position
+      $dx  = $cur.X - $Script:DriverGridDragCursor.X
+      $dy  = $cur.Y - $Script:DriverGridDragCursor.Y
+      $gridForm.Location = New-Object System.Drawing.Point(($Script:DriverGridDragOrigin.X + $dx), ($Script:DriverGridDragOrigin.Y + $dy))
+    }
+  }
+  $dragStop = { $Script:DriverGridDragging = $false }
+  $gridHeader.Add_MouseDown($dragStart); $gridHeader.Add_MouseMove($dragMove); $gridHeader.Add_MouseUp($dragStop)
+  $lblHeader.Add_MouseDown($dragStart);  $lblHeader.Add_MouseMove($dragMove);  $lblHeader.Add_MouseUp($dragStop)
+
+  # Grid window - a plain DataGridView handles hundreds of rows natively;
+  # pagination was deliberately left out unless real driver counts show it's
+  # needed (a single OEM driver pack is typically 100-300 INFs).
+  $grid = New-Object System.Windows.Forms.DataGridView
+  $grid.Location             = New-Object System.Drawing.Point(10, 38)
+  $grid.Size                 = New-Object System.Drawing.Size(($gridContent.Width - 20), ($gridContent.Height - 86))
+  $grid.Anchor                = "Top,Bottom,Left,Right"
+  # Default row/header height reads as visually cropped - text sits right at
+  # the cell edge even though there was vertical space to spare in the
+  # window. Set before DataSource is assigned so bound rows pick it up.
+  $grid.RowTemplate.Height    = 26
+  $grid.ColumnHeadersHeight   = 30
+  $grid.ColumnHeadersHeightSizeMode = "DisableResizing"
+  $grid.DataSource            = $Script:DriverTable
+  $grid.AllowUserToAddRows    = $false
+  $grid.AllowUserToDeleteRows = $false
+  $grid.AllowUserToResizeRows = $false
+  $grid.RowHeadersVisible     = $false
+  # "AllCells" only for the initial layout pass (below, in Add_Shown) so
+  # columns size to their content once - driver folder paths can be long, so
+  # a horizontal scrollbar is expected. Left running continuously it becomes
+  # a serious perf problem: every single data change (e.g. one row's
+  # Include flag flipping) triggers a full re-measurement of every cell in
+  # every row to decide if columns need to resize, which is why a 695-row
+  # bulk uncheck took ~22 seconds. Frozen to "None" right after the initial
+  # sizing pass (see Add_Shown) once the layout has been established.
+  $grid.AutoSizeColumnsMode   = "AllCells"
+  $grid.ScrollBars            = "Both"
+  $grid.BackgroundColor       = $ColDriverGridBg
+  $grid.ForeColor             = $ColFg
+  $grid.GridColor             = [System.Drawing.Color]::FromArgb(80, 80, 84)
+  $grid.DefaultCellStyle.BackColor       = [System.Drawing.Color]::FromArgb(68, 68, 72)
+  $grid.DefaultCellStyle.ForeColor       = $ColFg
+  $grid.DefaultCellStyle.SelectionBackColor = $ColAccent
+  $grid.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
+  $grid.ColumnHeadersDefaultCellStyle.ForeColor = $ColFg
+  $grid.EditMode = "EditOnEnter"
+  $gridContent.Controls.Add($grid)
+
+  $gridForm.Add_Shown({
+    if ($grid.Columns["InfPath"]) { $grid.Columns["InfPath"].Visible = $false }
+    if ($grid.Columns["Include"]) {
+      $grid.Columns["Include"].DisplayIndex  = 0
+      $grid.Columns["Include"].MinimumWidth  = 55
+    }
+    if ($grid.Columns["Path"]) { $grid.Columns["Path"].MinimumWidth = 160 }
+    # One-time sizing pass, then freeze to fixed widths - see the comment on
+    # AutoSizeColumnsMode above for why leaving "AllCells" running is the
+    # main cause of the multi-second bulk-edit stalls.
+    $grid.AutoResizeColumns([System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::AllCells)
+    $grid.AutoSizeColumnsMode = "None"
+  })
+
+  # Shared wrapper for any operation that flips Include on many rows at
+  # once. Two things made "Uncheck all 64-bit drivers" take ~22s on a
+  # 695-row list: (1) AutoSizeColumnsMode "AllCells" re-measuring every cell
+  # on every single row change (fixed above), and (2) each row's Include
+  # assignment individually notifying the bound DataGridView. BeginLoadData/
+  # EndLoadData suppresses that per-row notification traffic for the
+  # duration, applying the whole batch as one update instead of hundreds.
+  # Also gives the visual feedback that was missing before: wait cursor +
+  # disabled buttons (so a slow run - e.g. against a network-backed row
+  # count larger than tested here - can't be double-clicked), with
+  # DoEvents() forced in so the cursor actually paints before work starts
+  # rather than only appearing after the (now much shorter) operation ends.
+  function Invoke-DriverBulkEdit {
+    param([scriptblock]$Action)
+    $gridForm.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    $btnAll.Enabled = $false; $btnNone.Enabled = $false
+    $btnUncheck32.Enabled = $false; $btnUncheck64.Enabled = $false
+    [System.Windows.Forms.Application]::DoEvents()
+    $Script:DriverTable.BeginLoadData()
+    try {
+      & $Action
+    } finally {
+      $Script:DriverTable.EndLoadData()
+      $btnAll.Enabled = $true; $btnNone.Enabled = $true
+      $btnUncheck32.Enabled = $true; $btnUncheck64.Enabled = $true
+      $gridForm.Cursor = [System.Windows.Forms.Cursors]::Default
+    }
+    Update-DriverSummary
+  }
+
+  $btnAll = New-Object System.Windows.Forms.Button
+  $btnAll.Text      = "Check all"
+  $btnAll.Location  = New-Object System.Drawing.Point(10, ($gridContent.Height - 40))
+  $btnAll.Size      = New-Object System.Drawing.Size(90, 26)
+  $btnAll.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 74)
+  $btnAll.ForeColor = $ColFg
+  $btnAll.FlatStyle = "Flat"
+  $btnAll.Anchor    = "Bottom,Left"
+  $btnAll.Add_Click({ Invoke-DriverBulkEdit { foreach ($r in $Script:DriverTable.Rows) { $r["Include"] = $true } } })
+  $gridContent.Controls.Add($btnAll)
+
+  $btnNone = New-Object System.Windows.Forms.Button
+  $btnNone.Text      = "Uncheck all"
+  $btnNone.Location  = New-Object System.Drawing.Point(106, ($gridContent.Height - 40))
+  $btnNone.Size      = New-Object System.Drawing.Size(90, 26)
+  $btnNone.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 74)
+  $btnNone.ForeColor = $ColFg
+  $btnNone.FlatStyle = "Flat"
+  $btnNone.Anchor    = "Bottom,Left"
+  $btnNone.Add_Click({ Invoke-DriverBulkEdit { foreach ($r in $Script:DriverTable.Rows) { $r["Include"] = $false } } })
+  $gridContent.Controls.Add($btnNone)
+
+  $btnUncheck32 = New-Object System.Windows.Forms.Button
+  $btnUncheck32.Text      = "Uncheck all 32-bit drivers"
+  $btnUncheck32.Location  = New-Object System.Drawing.Point(202, ($gridContent.Height - 40))
+  $btnUncheck32.Size      = New-Object System.Drawing.Size(160, 26)
+  $btnUncheck32.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 74)
+  $btnUncheck32.ForeColor = $ColFg
+  $btnUncheck32.FlatStyle = "Flat"
+  $btnUncheck32.Anchor    = "Bottom,Left"
+  # Heuristic, not foolproof: a folder segment named "Win32", or a filename
+  # ending in "32.inf". See Test-Is32BitDriver.
+  $btnUncheck32.Add_Click({
+    Invoke-DriverBulkEdit { foreach ($r in $Script:DriverTable.Rows) { if (Test-Is32BitDriver $r) { $r["Include"] = $false } } }
+  })
+  $gridContent.Controls.Add($btnUncheck32)
+
+  $btnUncheck64 = New-Object System.Windows.Forms.Button
+  $btnUncheck64.Text      = "Uncheck all 64-bit drivers"
+  $btnUncheck64.Location  = New-Object System.Drawing.Point(368, ($gridContent.Height - 40))
+  $btnUncheck64.Size      = New-Object System.Drawing.Size(160, 26)
+  $btnUncheck64.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 74)
+  $btnUncheck64.ForeColor = $ColFg
+  $btnUncheck64.FlatStyle = "Flat"
+  $btnUncheck64.Anchor    = "Bottom,Left"
+  # Heuristic, not foolproof: a folder segment named "Winx64", "x64", or
+  # "Win64". See Test-Is64BitDriver.
+  $btnUncheck64.Add_Click({
+    Invoke-DriverBulkEdit { foreach ($r in $Script:DriverTable.Rows) { if (Test-Is64BitDriver $r) { $r["Include"] = $false } } }
+  })
+  $gridContent.Controls.Add($btnUncheck64)
+
+  $btnClose = New-Object System.Windows.Forms.Button
+  $btnClose.Text      = "OK"
+  $btnClose.Location  = New-Object System.Drawing.Point(($gridContent.Width - 100), ($gridContent.Height - 40))
+  $btnClose.Size      = New-Object System.Drawing.Size(90, 26)
+  $btnClose.BackColor = $ColAccent
+  $btnClose.ForeColor = $ColFg
+  $btnClose.FlatStyle = "Flat"
+  $btnClose.Anchor    = "Bottom,Right"
+  $btnClose.Add_Click({ $gridForm.Close() })
+  $gridContent.Controls.Add($btnClose)
+
+  $gridForm.Add_FormClosing({
+    # Flush any pending checkbox edit before reading $Script:DriverTable -
+    # a DataGridView checkbox cell can still be "in edit" if the user's last
+    # click was on it right before closing, and EndEdit forces that into the
+    # underlying DataTable before we save it. FormClosing (not FormClosed)
+    # is used specifically because it fires before $grid is torn down.
+    try { $grid.EndEdit() } catch {}
+    Save-DriverPersistence
+  })
+  $gridForm.Add_FormClosed({ Update-DriverSummary })
+  $gridForm.ShowDialog($Form) | Out-Null
+})
+
+# ==============================================================================
+# TAB 6 - SCCM
 # ==============================================================================
 $TabSCCM = New-Tab "  SCCM"
 
 # Dynamic form resizing - expand when entering SCCM tab, restore when leaving
-$Script:FormDefaultHeight = 620
+$Script:FormDefaultHeight = 670
 $Script:FormSCCMHeight    = 980
+# Restore-DriverSelectionFromXml does a real folder scan (Get-ChildItem
+# -Recurse against the driver path, potentially a slow/large UNC or DFS
+# share) - running it unconditionally at startup added a visible delay
+# before the window even became interactive, even for users who never touch
+# the Drivers tab this session. Deferred to the first time the tab is
+# actually opened instead; $Script:DriverRestoreDone ensures it only runs
+# once per session (re-running on every tab visit would re-scan pointlessly,
+# and would also stomp on any in-progress edits in the review grid).
+$Script:DriverRestoreDone = $false
 $Tabs.Add_SelectedIndexChanged({
   if ($Tabs.SelectedTab -eq $TabSCCM -or $Tabs.SelectedTab -eq $TabHelp) {
     $Form.MinimumSize = New-Object System.Drawing.Size(780, $Script:FormSCCMHeight)
@@ -1765,9 +3300,19 @@ $Tabs.Add_SelectedIndexChanged({
     $Form.MinimumSize = New-Object System.Drawing.Size(0, 0)
     $Form.Size        = New-Object System.Drawing.Size(780, $Script:FormDefaultHeight)
     $Form.MinimumSize = New-Object System.Drawing.Size(780, $Script:FormDefaultHeight)
-    $Tabs.Size        = New-Object System.Drawing.Size(742, 449)
+    $Tabs.Size        = New-Object System.Drawing.Size(742, 499)
     if ($HelpText) { $HelpText.Size = New-Object System.Drawing.Size(722, 410) }
     $PanelBottom.BringToFront()
+  }
+
+  if ($Tabs.SelectedTab -eq $TabDrivers -and -not $Script:DriverRestoreDone) {
+    $Script:DriverRestoreDone = $true
+    $Form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    try {
+      Restore-DriverSelectionFromXml
+    } finally {
+      $Form.Cursor = [System.Windows.Forms.Cursors]::Default
+    }
   }
 })
 
@@ -2627,7 +4172,7 @@ $Sec4.Controls.Add($BtnSCCMImport)
 # calls Update-SCCMPreview internally - no additional wiring needed here.
 
 # ==============================================================================
-# TAB 6 - PATCH WIM
+# TAB 7 - PATCH WIM
 # ==============================================================================
 $TabPatchWim = New-Tab "  Patch WIM"
 
@@ -2838,7 +4383,6 @@ $RadPWSrcSCCM.Add_CheckedChanged({
     $LblPWPkgPreview.ForeColor     = [System.Drawing.Color]::FromArgb(0, 200, 80)
     $RadPatchWimReplace.Enabled    = $true
     $RadPatchWimNew.Enabled        = $true
-    $LblPWActionHint.ForeColor     = $ColSubtext
     # Disable Local WIM column
     $TxtPatchWim.Enabled           = $false
     $TxtPatchWim.ForeColor         = $ColSubtext
@@ -2867,7 +4411,6 @@ $RadPWSrcLocal.Add_CheckedChanged({
     $LblPWPkgPreview.ForeColor     = $ColSubtext
     $RadPatchWimReplace.Enabled    = $false
     $RadPatchWimNew.Enabled        = $false
-    $LblPWActionHint.ForeColor     = [System.Drawing.Color]::FromArgb(80, 80, 80)
   }
 })
 
@@ -2890,7 +4433,7 @@ $ChkPatchMode.Add_CheckedChanged({
   $TabLang.Enabled = -not $on
   $TabApps.Enabled = -not $on
   $TabFoD.Enabled  = -not $on
-  foreach ($chk in @($ChkSkipUpdates, $ChkSkipLPs, $ChkSkipAppx)) {
+  foreach ($chk in @($ChkSkipUpdates, $ChkSkipLPs, $ChkSkipAppx, $ChkSkipInboxAppFix)) {
     $chk.Enabled = -not $on
     if ($on) { $chk.Checked = $false }
   }
@@ -3104,15 +4647,6 @@ $RadPatchWimNew.Location  = New-Object System.Drawing.Point(14, $pp)
 $PWSecDetails.Controls.Add($RadPatchWimNew)
 $pp += 26
 
-# ---- Hint (left column only, hard width cap) ----
-$LblPWActionHint = New-Object System.Windows.Forms.Label
-$LblPWActionHint.Text      = "Click > Run. Action and Package Name apply to SCCM source only."
-$LblPWActionHint.Font      = $FontSmall
-$LblPWActionHint.ForeColor = $ColSubtext
-$LblPWActionHint.Location  = New-Object System.Drawing.Point(14, $pp)
-$LblPWActionHint.Size      = New-Object System.Drawing.Size(336, 16)
-$PWSecDetails.Controls.Add($LblPWActionHint)
-
 # ---- Wire up text-changed for previews ----
 $TxtPatchWimPkgName.Add_TextChanged({
   if (-not $Script:PatchWimWritingPkgName) {
@@ -3131,7 +4665,7 @@ $TxtPatchWimOutName.Add_TextChanged({
 })
 
 # ==============================================================================
-# TAB 7 - HELP
+# TAB 8 - HELP
 # ==============================================================================
 $TabHelp = New-Tab "  Help"
 
@@ -3163,6 +4697,11 @@ You need ISOs from Microsoft Volume Licensing. See links below.
   ARM64 build:
     - Windows 11 Enterprise ISO  (SW_DVD9_Win_Pro_11_25H2*Arm64_*.ISO)
     - Language Pack ISO (ARM64)  (SW_DVD9_Win_11_*_Arm64_*_LangPack_*.ISO)
+  Windows Insider Preview ISOs are also detected automatically
+    (Windows11_InsiderPreview_Client_x64_en-us_BUILD_REV.ISO, from
+    aka.ms/WindowsInsiderPreviewISO). These typically contain only a
+    single edition (e.g. Pro) - the build auto-selects it since there
+    is no Enterprise edition to choose between.
 
 Place all needed ISOs in the same folder (ISO-Source\ next to the script).
 You can have all four ISOs present at once - the correct ones are selected
@@ -3210,6 +4749,15 @@ Output WIM:        Where to save the finished WIM. Auto-generated
 Skip updates:      Do not download or apply Patch Tuesday updates.
 Skip lang packs:   Build English-only image (no LP injection).
 Skip Appx removal: Keep all built-in apps.
+Skip inbox app language fix:
+  Kept Store apps (Notepad, Calculator, Paint etc.) can still show in
+  English at first logon even after a language pack is injected, because
+  their UI language comes from a satellite the Store framework downloaded
+  at install time - not from the OS. WimWizard normally fixes this by
+  reinstalling those apps via winget at first user logon so the Store
+  re-fetches the correct language satellite. Check this box to disable
+  that fix. Greyed out (and skipped automatically either way) when Skip
+  lang packs is checked, since there's no language to fix in that case.
 Patch existing image:
   Instead of building from the ISO, patch an already-serviced WIM with
   the latest updates only. Language packs and app removal are skipped.
@@ -3231,6 +4779,48 @@ No separate download is required - the LP ISO contains all FoD packages.
 
 RSAT checkboxes are automatically hidden when ARM64 architecture is
 detected (only one Windows ISO in source folder, ARM64 type).
+
+
+TAB: DRIVERS
+------------
+Injects hardware drivers into the full OS image (install.wim). Not
+available in Patch WIM mode.
+
+Tip: this is meant for special circumstances (a specific model needing a
+driver not in Windows Update, or offline deployment scenarios). For normal
+fleet driver management, a dedicated tool - Driver Automation Toolkit,
+Lenovo Commercial Vantage, Dell Command | Update, or HP Image Assistant -
+is usually the better fit.
+
+Driver folder:     Local or UNC path to a folder of expanded driver
+                   packages (.inf/.sys/.cat - not vendor .exe installers).
+                   Subfolders are scanned recursively.
+
+Scan Folder:       Reads every .inf under the folder (Manufacturer, Class,
+                   Version, Date parsed from each file - no DISM or mount
+                   required) and builds the review list below. Safe to
+                   click again later as a refresh if more drivers are added
+                   to the folder - your existing checkbox choices are kept
+                   for drivers already seen; only newly-found ones default
+                   to checked.
+
+Show selected drivers:
+  Opens a review grid (Include / Manufacturer / Class / Version / Date /
+  Path / FileName) - greyed out until a scan has completed. Toggle the
+  Include checkbox per driver, or use:
+    Check all / Uncheck all
+    Uncheck all 32-bit drivers / Uncheck all 64-bit drivers
+      Heuristic, not foolproof: 32-bit = a "Win32" folder in the path, or a
+      filename ending "32.inf"; 64-bit = "Winx64"/"x64"/"Win64" anywhere in
+      the path or filename. A driver that doesn't follow either naming
+      convention won't be caught by these buttons - check it manually.
+  Your selection is saved (folder path to the registry, checked drivers to
+  WimWizard-DriverList.xml) as soon as you close this window, and restored
+  automatically next time you open WimWizard against the same folder.
+
+If you never click Scan Folder, or never open the review grid, every
+driver found under the folder is injected - equivalent to the command-line
+-DriverPath behavior.
 
 
 TAB: SCCM
@@ -3288,6 +4878,51 @@ If a build succeeds but auto-import fails, a warning is shown on the
 completion screen. The WIM is always safe on disk regardless.
 
 
+TAB: PATCH WIM
+--------------
+Applies the latest updates to an already-serviced WIM without rebuilding
+from ISO - languages and apps are read directly from the existing image,
+so no ISO or Language Pack ISO is needed for this workflow. Recommended
+setup: keep an evaluation image and a production image in separate task
+sequences; once the evaluation image is approved, swap the updated image
+into the production task sequence in SCCM.
+
+Enable patch mode:  Turns off the Languages / Applications / Features on
+                    Demand tabs (read from the source WIM instead) and the
+                    Skip updates / Skip lang packs / Skip Appx checkboxes
+                    on the Options tab - none of those apply when patching.
+
+Source - choose one:
+  From SCCM package:  Enter the 8-character Package ID (e.g. FC100042).
+                      Verified automatically against SCCM as you type -
+                      a green check means found (package name fills in
+                      automatically); a red X means not found or SCCM is
+                      unreachable.
+  Local WIM file:      Browse to a WIM already on disk (e.g. your last
+                      build in Output\).
+
+Package Name (SCCM source only):
+  Click {Date} to insert today's date into the name. The preview line
+  below shows the resolved name live.
+
+Output path (Local file source only):
+  Where the patched WIM is saved. Auto-fills from the source filename;
+  click {Date} to insert today's date, or Browse to pick a different
+  location or filename.
+
+Action (SCCM source only - has no effect for a local file):
+  Replace existing package:  Updates the SCCM package in place, keeping
+                             the same Package ID so task sequence
+                             references keep working. Recommended for
+                             routine monthly patching.
+  Create new package:        Creates a new OS Image package in SCCM
+                             instead of updating the one just patched from.
+
+Click > Run once configured. Only updates are downloaded and applied - no
+ISO discovery, language pack injection, driver injection, or Appx removal
+steps run in patch mode.
+
+
 FIRST-TIME SETUP
 ----------------
 1. Download the Windows 11 Enterprise ISO and Language Pack ISO from:
@@ -3306,11 +4941,14 @@ FIRST-TIME SETUP
 
 MONTHLY PATCHING
 ----------------
-1. Check "Patch existing image" in the Options tab.
-2. Browse to your last built WIM (e.g. in Output\).
-3. Languages are read automatically from the WIM.
+1. Open the Patch WIM tab and check "Enable patch mode".
+2. Choose a source: an SCCM Package ID, or Browse to a local WIM
+   (e.g. your last build in Output\).
+3. Languages and apps are read automatically from the source WIM.
 4. Click Run - only updates are downloaded and applied.
-5. Output filename is the same as the source but with today's date.
+5. SCCM source updates the same package in place by default ("Replace
+   existing package"). Local file source: output filename matches the
+   source, with today's date.
 
 
 STANDALONE (NO GUI)
@@ -3569,7 +5207,16 @@ function Get-SettingsSnapshot {
   $fods  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $dpGroup = if ($CmbSCCMDPGroup -and $CmbSCCMDPGroup.SelectedItem) { $CmbSCCMDPGroup.SelectedItem.ToString() } else { "<None>" }
   $sccm  = "$($TxtSCCMServer.Text)|$($TxtSCCMSiteCode.Text)|$($TxtSCCMPath.Text)|$($TxtSCCMNameTemplate.Text)|$($TxtSCCMComment.Text)|$([int]$RadSCCMUpdate.Checked)|$($TxtSCCMPackageID.Text)|$([int]$ChkSCCMAutoImport.Checked)|$([int]$ChkSCCMUpdateDPs.Checked)|$dpGroup"
-  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$sccm"
+  # Include the actual Include-selection, not just the folder path - toggling
+  # checkboxes with the path unchanged is a real settings change too, and
+  # needs to register here for the exit-time "unsaved changes?" prompt to
+  # fire (Save-DriverPersistence is now also called directly when the review
+  # grid closes, but this is a second line of defense for any other path
+  # that changes the selection without touching the grid).
+  $driverSel = if ($Script:DriverTable) {
+    (@($Script:DriverTable.Select("Include = true")) | ForEach-Object { [string]$_["InfPath"] } | Sort-Object) -join ";"
+  } else { "" }
+  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkSkipInboxAppFix.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
 }
 
 # -- Build command string -------------------------------------------------------
@@ -3617,19 +5264,40 @@ function Build-CommandString {
   if ($src -and $src -ne "$ScriptRoot\ISO-Source") {
     $cmd += " -SourceFolder `"$src`""
   }
+  $chosenIsoPath = Get-ChosenWindowsISOPath
+  if ($chosenIsoPath) { $cmd += " -WindowsISOPath `"$chosenIsoPath`"" }
 
   $out = $TxtOutput.Text.Trim()
   if (-not $out -or $TxtOutput.Tag -ne "manual") {
     $out = Get-FilenamePreview -SelectedCodes $(if ($ChkSkipLPs -and $ChkSkipLPs.Checked) { @() } else { $selCodes }) -BuildStr $Script:BuildString
   }
+  # Get-FilenamePreview returns a bare filename with no directory (by design -
+  # see 2.10.1). If $out is still bare here - whether from that branch, or
+  # because $TxtOutput.Tag was "manual" while its Text held a bare name with
+  # no folder typed in - anchor it to the default output folder so the
+  # preview always matches what Run will actually pass as -OutputPath.
+  if ($out -and -not [System.IO.Path]::IsPathRooted($out)) { $out = Join-Path "$ScriptRoot\Output" $out }
   $cmd += " -OutputPath `"$out`""
 
   if ($ChkSkipUpdates.Checked)  { $cmd += " -SkipUpdates" }
   if ($ChkSkipLPs.Checked)      { $cmd += " -SkipLanguagePacks" }
   if ($ChkSkipAppx.Checked)     { $cmd += " -SkipAppxRemoval" }
+  if ($ChkSkipInboxAppFix.Checked -and $ChkSkipInboxAppFix.Enabled) { $cmd += " -SkipInboxAppLanguageFix" }
   if ($FoDCheckboxes) {
     $previewFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
     if ($previewFoDs.Count -gt 0) { $cmd += " -FoDList `"$($previewFoDs -join ',')`"" }
+  }
+  if ($TxtDriverPath -and $TxtDriverPath.Text.Trim()) {
+    if ($Script:DriverTable) {
+      $previewDriverCount = @($Script:DriverTable.Select("Include = true")).Count
+      if ($previewDriverCount -gt 0) {
+        $cmd += " -DriverListPath `"$(Join-Path $ScriptRoot 'WimWizard-DriverList.xml')`""
+      }
+      # 0 selected = explicit "inject none" - omit from preview, matches real build
+    } else {
+      # Never imported via "Import drivers" - inject everything found
+      $cmd += " -DriverPath `"$($TxtDriverPath.Text.Trim())`""
+    }
   }
   if ($CmbEdition.Enabled -and $CmbEdition.SelectedItem) {
     $selName = [string]$CmbEdition.SelectedItem
@@ -3714,6 +5382,68 @@ function Update-LangSkipState {
     }
     $Script:SavedLangState = @{}
   }
+  # The inbox app language fix is a no-op with no language pack applied - disable
+  # it for the same reason (WimWizard.ps1 already skips it independently via its
+  # own -not $SkipLanguagePacks check, this is purely a UI cue). Its own checked
+  # state is left untouched since it doesn't matter while disabled.
+  $ChkSkipInboxAppFix.Enabled = -not $ChkSkipLPs.Checked
+}
+
+function Get-FreeSpaceGB {
+  # Returns free space (GB, rounded to 1 decimal) for the drive/share that
+  # would hold $Path, or $null if it cannot be determined (empty/invalid
+  # path, or an unreachable UNC share). $Path may point at a file that
+  # doesn't exist yet - the parent folder (or nearest existing ancestor) is
+  # used instead. A bare filename with no directory component (the
+  # auto-generated preview, before the user Browses for an output path) is
+  # resolved against "$ScriptRoot\Output" - the same default WimWizard.ps1
+  # itself falls back to when -OutputPath is omitted - so the check reflects
+  # where the build will actually land instead of silently giving up.
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+  try {
+    $dir = $Path
+    if ([System.IO.Path]::GetExtension($dir)) {
+      $parent = Split-Path $dir -Parent
+      if ($parent) { $dir = $parent } else { $dir = Join-Path $ScriptRoot "Output" }
+    }
+    if ([string]::IsNullOrWhiteSpace($dir)) { return $null }
+
+    if ($dir -match '^[A-Za-z]:\\?$|^[A-Za-z]:\\') {
+      # Local drive letter path - no need for the folder to exist
+      $driveLetter = $dir.Substring(0, 1)
+      $psDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+      if ($psDrive) { return [math]::Round($psDrive.Free / 1GB, 1) }
+      return $null
+    }
+
+    # UNC path (or anything else) - walk up to the nearest existing folder
+    $probe = $dir
+    while ($probe -and -not (Test-Path -LiteralPath $probe)) {
+      $parentProbe = Split-Path $probe -Parent
+      if (-not $parentProbe -or $parentProbe -eq $probe) { break }
+      $probe = $parentProbe
+    }
+    if (-not $probe -or -not (Test-Path -LiteralPath $probe)) { return $null }
+    $drive = New-Object System.IO.DriveInfo($probe)
+    return [math]::Round($drive.AvailableFreeSpace / 1GB, 1)
+  } catch {
+    return $null
+  }
+}
+
+function Update-DiskSpaceWarning {
+  # Shows an orange low-space warning under the output path field whenever
+  # fewer than $Script:MinFreeSpaceGB GB are free at the chosen location.
+  $path = $TxtOutput.Text.Trim()
+  $freeGB = Get-FreeSpaceGB -Path $path
+  if ($null -eq $freeGB -or $freeGB -ge $Script:MinFreeSpaceGB) {
+    $LblDiskSpace.Visible = $false
+    $LblDiskSpace.Text = ""
+    return
+  }
+  $LblDiskSpace.Text = "Low disk space: only $freeGB GB free (at least $($Script:MinFreeSpaceGB) GB recommended). The build can still run, but may fail if space runs out."
+  $LblDiskSpace.Visible = $true
 }
 
 function Update-UI {
@@ -3728,6 +5458,13 @@ function Update-UI {
   if ($TxtOutput.Tag -ne "manual") {
   $TxtOutput.Text = $preview
   }
+
+  # Called directly (not left to $TxtOutput's TextChanged event alone) so the
+  # warning is (re)evaluated every time Update-UI runs - e.g. right after the
+  # source ISO is verified and the auto-generated name is computed - even
+  # when that name happens to be unchanged from the previous check and so
+  # would not have re-fired TextChanged on its own.
+  Update-DiskSpaceWarning
 
   # Refresh SCCM package name preview
   Update-SCCMPreview
@@ -3748,6 +5485,7 @@ $ChkSkipUpdates.Add_CheckedChanged({ Update-UI })
 $ChkSkipLPs.Add_CheckedChanged({ Update-LangSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-AppxSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-UI })
+$ChkSkipInboxAppFix.Add_CheckedChanged({ Update-UI })
 $TxtPatchWim.Add_TextChanged({ Update-UI })
 $TxtSource.Add_TextChanged({ Start-ISOProbe })
 
@@ -3755,6 +5493,10 @@ $TxtSource.Add_TextChanged({ Start-ISOProbe })
 $TxtOutput.Add_TextChanged({
   if ($Form.Focused -or $TxtOutput.Focused) { $TxtOutput.Tag = "manual" }
 })
+
+# Show a low-space warning whenever the output path changes (Browse dialog,
+# manual typing, or the auto-generated filename preview).
+$TxtOutput.Add_TextChanged({ Update-DiskSpaceWarning })
 
 # -- Run button -----------------------------------------------------------------
 $BtnRun.Add_MouseEnter({ $BtnRun.BackColor = [System.Drawing.Color]::FromArgb(30, 255, 255, 255) })
@@ -4131,6 +5873,8 @@ $Script:RunClick = {
 
   $src = $TxtSource.Text.Trim()
   if ($src) { $argList += "-SourceFolder `"$src`"" }
+  $chosenIsoPath = Get-ChosenWindowsISOPath
+  if ($chosenIsoPath) { $argList += "-WindowsISOPath `"$chosenIsoPath`"" }
 
   $out = $TxtOutput.Text.Trim()
   if (-not $out -or $TxtOutput.Tag -ne "manual") {
@@ -4138,6 +5882,18 @@ $Script:RunClick = {
     $out = Get-FilenamePreview -SelectedCodes $previewCodes -BuildStr $Script:BuildString
     $out = Join-Path "$ScriptRoot\Output" $out
   }
+  # Root cause of the "-SkipInboxAppLanguageFix" build crash (Cannot bind
+  # argument to parameter 'Path' because it is an empty string, at Step 4/4):
+  # $TxtOutput.Tag can flip to "manual" (see its TextChanged handler below)
+  # from a programmatic refresh, not just real typing, while $TxtOutput.Text
+  # still holds a bare auto-generated filename with no folder. That skipped
+  # the Join-Path above entirely, so a bare name went straight through as
+  # -OutputPath - WimWizard.ps1 then hit Split-Path -Parent on it, got "",
+  # and crashed unhandled in the unprotected Step 4/4 block (before its main
+  # try/catch). Not something -SkipInboxAppLanguageFix itself touches; it
+  # just happened to be the checkbox toggled right before the failing run.
+  # Anchor any still-bare $out here too, regardless of how Tag got set.
+  if ($out -and -not [System.IO.Path]::IsPathRooted($out)) { $out = Join-Path "$ScriptRoot\Output" $out }
   $argList += "-OutputPath `"$out`""
 
   # Export Appx removal list to XML so WimWizard.ps1 can consume it via -AppxListPath
@@ -4175,10 +5931,38 @@ $Script:RunClick = {
 
   if ($ChkSkipUpdates.Checked)  { $argList += "-SkipUpdates" }
   if ($ChkSkipLPs.Checked)      { $argList += "-SkipLanguagePacks" }
-  if ($ChkSkipAppx.Checked)     { $argList += "-SkipAppxRemoval" }
+  if ($ChkSkipInboxAppFix.Checked -and $ChkSkipInboxAppFix.Enabled) { $argList += "-SkipInboxAppLanguageFix" }
+  # NOTE: -SkipAppxRemoval is NOT added here even when $ChkSkipAppx.Checked is true.
+  # Checking that box (via Update-AppxSkipState) forces every app checkbox to
+  # $false, so $checkedPkgs.Count is already 0 and the block above already added
+  # -SkipAppxRemoval. Adding it again here duplicated the switch on the command
+  # line, which PowerShell's parameter binder rejects ("parameter ... specified
+  # more than once"), aborting the launcher before WimWizard.ps1 ever ran -
+  # the build appeared to finish instantly with no WIM produced. The manual
+  # workaround (leave the checkbox unchecked, deselect every app by hand) only
+  # ever hit the block above once, which is why it worked.
 
   $selectedFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
   if ($selectedFoDs.Count -gt 0) { $argList += "-FoDList `"$($selectedFoDs -join ',')`"" }
+
+  # Driver injection args. Mirrors the Appx XML export pattern above:
+  # - Never imported via "Import drivers" -> pass -DriverPath directly
+  #   (inject everything found), same as the CLI default.
+  # - Scanned, with at least one driver checked -> export the checked subset
+  #   to XML and pass -DriverListPath instead (overrides -DriverPath).
+  # - Scanned, with zero drivers checked -> explicit "inject none", omit both.
+  $driverRoot = $TxtDriverPath.Text.Trim()
+  if ($driverRoot) {
+    if ($Script:DriverTable) {
+      $checkedDrivers = @($Script:DriverTable.Select("Include = true"))
+      if ($checkedDrivers.Count -gt 0) {
+        $DriverXmlPath = Save-DriverSelectionXml
+        if ($DriverXmlPath) { $argList += "-DriverListPath `"$DriverXmlPath`"" }
+      }
+    } else {
+      $argList += "-DriverPath `"$driverRoot`""
+    }
+  }
 
   # SCCM import args - only when auto-import enabled and CM module present
   if ($ChkSCCMAutoImport -and $ChkSCCMAutoImport.Checked -and $Script:SCCMModuleAvailable) {
@@ -4334,6 +6118,11 @@ $Form.Add_Shown({
 
   # Load saved registry settings
   Load-Settings
+  # Driver selection restore is deferred to the first time the Drivers tab
+  # is opened (see $Tabs.Add_SelectedIndexChanged) rather than done here -
+  # it's a real folder scan that could be slow against a large/UNC share,
+  # and doing it unconditionally at startup delayed the window becoming
+  # interactive even for users who never touch that tab this session.
   # Apply Skip Languages visual state if it was saved as checked
   Update-LangSkipState
   Update-AppxSkipState
