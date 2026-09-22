@@ -14,11 +14,51 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.12.3
+  Version : 2.13.0
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.13.0 Change: removed the "Output filename preview" strip from the bottom
+         of the Languages tab. The auto-generated name is still visible live
+         via the Options tab's Output WIM field (Update-UI already kept that
+         field in sync with the same generated value, independent of this
+         label - see 2.10.1), so nothing was lost, just a duplicate display
+         surface. $LblPreview itself is kept as a headless Label (never added
+         to any Controls collection) rather than touched, since Update-UI
+         still writes to its .Text every refresh and there was no reason to
+         change that shared code path just to stop rendering it.
+         Moved the inbox-app-language checkbox and its description label from
+         the Options tab to the newly freed space on the Languages tab: the
+         setting only does anything in the context of language selection
+         (Update-LangSkipState already greys it out whenever "Skip lang
+         packs" is checked, since the fix is a no-op with no LP applied) so
+         it belongs next to the language checkboxes rather than in general
+         Servicing options.
+         Also reworded and re-framed that checkbox from an opt-out ("Skip
+         inbox app language fix", unchecked by default) to an opt-in ("Fix
+         built-in app language (Notepad, Calculator, etc.)", checked by
+         default) - the checked state now reads directly as "this is
+         happening" instead of requiring a mental double-negative. Renamed
+         $ChkSkipInboxAppFix -> $ChkFixInboxAppLang throughout. Added a
+         ToolTip explaining the underlying Store-satellite-package issue,
+         since the old inline description didn't say what bug the fix
+         actually addresses. The CLI switch itself is untouched
+         (-SkipInboxAppLanguageFix, still a skip switch) - Build-CommandString
+         and RunClick now emit it when the checkbox is UNchecked instead of
+         checked, and Save-/Load-Settings invert the checkbox's value at the
+         registry read/write boundary so the persisted "SkipInboxAppFix"
+         registry value keeps its original meaning and existing saved
+         settings still load correctly. $ChkFixInboxAppLang.Location.X
+         adjusted from 4 to 8 to align with the language checkboxes' column
+         (they sit inside $LangPanel, itself at x=4, with a further +4 col
+         offset - so their effective x is 8, not $LangPanel's own 4). The
+         explanatory ToolTip was replaced with a static multi-line label
+         under the checkbox's short description - this tab has the room for
+         it and static text doesn't require the user to think to hover. That
+         text also drops the "greyed out when Skip lang packs is checked"
+         sentence - the greyed-out state itself already makes that obvious.
+         Help tab text for both tabs updated to match.
   2.12.3 Change: grew the default window from 780x620 to 780x670 (and the
          Options tab's usable height from 449 to 499px, in both the initial
          layout and the SCCM/Help-tab resize handler's "restore defaults"
@@ -995,7 +1035,7 @@ function Save-Settings {
     Set-ItemProperty $RegPath -Name "SkipLPs"    -Value 0
   }
   Set-ItemProperty $RegPath -Name "SkipAppx"     -Value ([int]$ChkSkipAppx.Checked)
-  Set-ItemProperty $RegPath -Name "SkipInboxAppFix" -Value ([int]$ChkSkipInboxAppFix.Checked)
+  Set-ItemProperty $RegPath -Name "SkipInboxAppFix" -Value ([int](-not $ChkFixInboxAppLang.Checked))
   $selFoDs  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key }) -join ","
   Set-ItemProperty $RegPath -Name "FoDs"             -Value $selFoDs
   Save-DriverPersistence
@@ -1041,7 +1081,7 @@ function Load-Settings {
     if ($reg.PSObject.Properties["SkipUpdates"])  { $ChkSkipUpdates.Checked = [bool]$reg.SkipUpdates }
     if ($reg.PSObject.Properties["SkipLPs"])      { $ChkSkipLPs.Checked     = [bool]$reg.SkipLPs     }
     if ($reg.PSObject.Properties["SkipAppx"])     { $ChkSkipAppx.Checked    = [bool]$reg.SkipAppx    }
-    if ($reg.PSObject.Properties["SkipInboxAppFix"]) { $ChkSkipInboxAppFix.Checked = [bool]$reg.SkipInboxAppFix }
+    if ($reg.PSObject.Properties["SkipInboxAppFix"]) { $ChkFixInboxAppLang.Checked = -not [bool]$reg.SkipInboxAppFix }
     if ($reg.PSObject.Properties["FoDs"]) {
       foreach ($cb in $FoDCheckboxes.Values) { $cb.Checked = $false }
       foreach ($key in $reg.FoDs.Split(",")) {
@@ -1519,7 +1559,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.12.3"
+$WimWizardVersion = "2.13.0"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -2479,13 +2519,6 @@ $TabOpts.Controls.Add($ChkSkipAppx)
 $TabOpts.Controls.Add((New-OptionLabel "Do not remove any provisioned Appx packages." $y))
 
 $y += 45
-$ChkSkipInboxAppFix = New-DarkCheckbox -Text "Skip inbox app language fix  (-SkipInboxAppLanguageFix)" -Checked $false
-$ChkSkipInboxAppFix.Location = New-Object System.Drawing.Point(8, $y)
-$ChkSkipInboxAppFix.Width  = 400
-$TabOpts.Controls.Add($ChkSkipInboxAppFix)
-$TabOpts.Controls.Add((New-OptionLabel "Do not reinstall kept inbox apps via winget to fix their display language." $y))
-
-$y += 45
 
 
 
@@ -2530,28 +2563,49 @@ foreach ($code in $keys) {
   if ($row -ge [math]::Ceiling($keys.Count / 3)) { $row = 0; $col++ }
 }
 
-# Filename preview strip
-$PanelPreview  = New-Object System.Windows.Forms.Panel
-$PanelPreview.Location = New-Object System.Drawing.Point(4, 357)
-$PanelPreview.Size  = New-Object System.Drawing.Size(720, 58)
-$PanelPreview.BackColor= [System.Drawing.Color]::FromArgb(25, 25, 25)
-$TabLang.Controls.Add($PanelPreview)
-
-$LblPreviewCaption  = New-Object System.Windows.Forms.Label
-$LblPreviewCaption.Text= "Output filename preview:"
-$LblPreviewCaption.Font= $FontSmall
-$LblPreviewCaption.ForeColor = $ColSubtext
-$LblPreviewCaption.Location  = New-Object System.Drawing.Point(12, 8)
-$LblPreviewCaption.AutoSize  = $true
-$PanelPreview.Controls.Add($LblPreviewCaption)
-
+# $LblPreview no longer has a visible home (the "Output filename preview" strip
+# that used to sit here was removed from this tab), but Update-UI still writes
+# the live-generated filename into its .Text - kept as a headless control
+# (never added to any Controls collection) rather than touching that shared
+# code path. The generated name is still visible to the user via the Options
+# tab's output field, which Update-UI keeps in sync the same way.
 $LblPreview  = New-Object System.Windows.Forms.Label
-$LblPreview.Font  = $FontBold
-$LblPreview.ForeColor  = $ColWarn
-$LblPreview.Location  = New-Object System.Drawing.Point(12, 24)
-$LblPreview.Size  = New-Object System.Drawing.Size(694, 40)
-$LblPreview.AutoEllipsis = $false
-$PanelPreview.Controls.Add($LblPreview)
+
+# Fix built-in app language - moved here from the Options tab (was "Skip
+# inbox app language fix"): it only makes sense in the context of language
+# selection (it's a no-op with no LP applied, see Update-LangSkipState), so
+# it belongs next to the language checkboxes rather than buried in general
+# Servicing options.
+#
+# Reworded from an opt-out ("Skip ...") to an opt-in ("Fix ...", pre-checked)
+# so the checked state reads as "this is happening" rather than requiring the
+# user to mentally negate a "skip" label to figure out the current behavior.
+# The underlying CLI switch is unchanged (-SkipInboxAppLanguageFix, still a
+# skip switch) - Build-CommandString/RunClick below invert the checkbox's
+# Checked value when deciding whether to emit it, and Save-/Load-Settings
+# invert it again at the registry boundary, so the persisted registry value
+# and the CLI switch both keep their original "skip" meaning; only the
+# on-screen checkbox and variable name ($ChkFixInboxAppLang) changed.
+$ChkFixInboxAppLang = New-DarkCheckbox -Text "Fix built-in app language (Notepad, Calculator, etc.)" -Checked $true
+$ChkFixInboxAppLang.Location = New-Object System.Drawing.Point(8, 357)
+$ChkFixInboxAppLang.Width  = 500
+$TabLang.Controls.Add($ChkFixInboxAppLang)
+$TabLang.Controls.Add((New-OptionLabel "Reinstalls kept Store apps via winget at first logon so they pick up the correct display language." 357))
+
+# Fuller explanation as static text rather than a hover tooltip - this tab has
+# the vertical room for it, and it's more discoverable than something the
+# user has to think to hover over.
+$LblFixInboxAppLangInfo = New-Object System.Windows.Forms.Label
+$LblFixInboxAppLangInfo.Text =
+  "Store-delivered apps like Notepad, Calculator and Paint get their UI language from a satellite package the " +
+  "Store downloads separately - not from the language pack injected into the image. Left unfixed, these apps " +
+  "stay in English even after a language pack is applied. When checked (default), WimWizard reinstalls the " +
+  "kept apps via winget at first user logon so the Store re-fetches the correct language satellite."
+$LblFixInboxAppLangInfo.ForeColor = $ColSubtext
+$LblFixInboxAppLangInfo.Font  = $FontSmall
+$LblFixInboxAppLangInfo.Location = New-Object System.Drawing.Point(30, 400)
+$LblFixInboxAppLangInfo.Size  = New-Object System.Drawing.Size(680, 60)
+$TabLang.Controls.Add($LblFixInboxAppLangInfo)
 
 # ==============================================================================
 # TAB 2 - APPLICATIONS
@@ -4433,10 +4487,16 @@ $ChkPatchMode.Add_CheckedChanged({
   $TabLang.Enabled = -not $on
   $TabApps.Enabled = -not $on
   $TabFoD.Enabled  = -not $on
-  foreach ($chk in @($ChkSkipUpdates, $ChkSkipLPs, $ChkSkipAppx, $ChkSkipInboxAppFix)) {
+  foreach ($chk in @($ChkSkipUpdates, $ChkSkipLPs, $ChkSkipAppx)) {
     $chk.Enabled = -not $on
     if ($on) { $chk.Checked = $false }
   }
+  # $ChkFixInboxAppLang defaults to checked (opt-in framing, see its creation
+  # comment) - resetting it to $false here like the Skip* checkboxes above
+  # would leave it visually showing "fix disabled" while merely greyed out
+  # for the irrelevant patch-mode duration, so it gets its own default instead.
+  $ChkFixInboxAppLang.Enabled = -not $on
+  if ($on) { $ChkFixInboxAppLang.Checked = $true }
   if ($on -and $RadPWSrcLocal.Checked -and $TxtPatchWim.Text -ne "Select existing WIM file..." -and (Test-Path $TxtPatchWim.Text)) {
     Read-WimLanguages -WimPath $TxtPatchWim.Text
   }
@@ -4713,8 +4773,15 @@ TAB: LANGUAGES
 Select which language packs to inject. Previously saved selections are
 restored automatically from the registry on startup.
 
-The output filename preview at the bottom updates live as you select
-languages - e.g. Win11_25H2_26200.xxxx_da_fi_no_se_20260404.wim
+Skip inbox app language fix:
+  Kept Store apps (Notepad, Calculator, Paint etc.) can still show in
+  English at first logon even after a language pack is injected, because
+  their UI language comes from a satellite the Store framework downloaded
+  at install time - not from the OS. WimWizard normally fixes this by
+  reinstalling those apps via winget at first user logon so the Store
+  re-fetches the correct language satellite. Check this box to disable
+  that fix. Greyed out (and skipped automatically either way) when Skip
+  lang packs is checked, since there's no language to fix in that case.
 
 
 TAB: APPLICATIONS
@@ -4749,15 +4816,6 @@ Output WIM:        Where to save the finished WIM. Auto-generated
 Skip updates:      Do not download or apply Patch Tuesday updates.
 Skip lang packs:   Build English-only image (no LP injection).
 Skip Appx removal: Keep all built-in apps.
-Skip inbox app language fix:
-  Kept Store apps (Notepad, Calculator, Paint etc.) can still show in
-  English at first logon even after a language pack is injected, because
-  their UI language comes from a satellite the Store framework downloaded
-  at install time - not from the OS. WimWizard normally fixes this by
-  reinstalling those apps via winget at first user logon so the Store
-  re-fetches the correct language satellite. Check this box to disable
-  that fix. Greyed out (and skipped automatically either way) when Skip
-  lang packs is checked, since there's no language to fix in that case.
 Patch existing image:
   Instead of building from the ISO, patch an already-serviced WIM with
   the latest updates only. Language packs and app removal are skipped.
@@ -5216,7 +5274,7 @@ function Get-SettingsSnapshot {
   $driverSel = if ($Script:DriverTable) {
     (@($Script:DriverTable.Select("Include = true")) | ForEach-Object { [string]$_["InfPath"] } | Sort-Object) -join ";"
   } else { "" }
-  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkSkipInboxAppFix.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
+  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkFixInboxAppLang.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
 }
 
 # -- Build command string -------------------------------------------------------
@@ -5282,7 +5340,7 @@ function Build-CommandString {
   if ($ChkSkipUpdates.Checked)  { $cmd += " -SkipUpdates" }
   if ($ChkSkipLPs.Checked)      { $cmd += " -SkipLanguagePacks" }
   if ($ChkSkipAppx.Checked)     { $cmd += " -SkipAppxRemoval" }
-  if ($ChkSkipInboxAppFix.Checked -and $ChkSkipInboxAppFix.Enabled) { $cmd += " -SkipInboxAppLanguageFix" }
+  if (-not $ChkFixInboxAppLang.Checked -and $ChkFixInboxAppLang.Enabled) { $cmd += " -SkipInboxAppLanguageFix" }
   if ($FoDCheckboxes) {
     $previewFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
     if ($previewFoDs.Count -gt 0) { $cmd += " -FoDList `"$($previewFoDs -join ',')`"" }
@@ -5386,7 +5444,7 @@ function Update-LangSkipState {
   # it for the same reason (WimWizard.ps1 already skips it independently via its
   # own -not $SkipLanguagePacks check, this is purely a UI cue). Its own checked
   # state is left untouched since it doesn't matter while disabled.
-  $ChkSkipInboxAppFix.Enabled = -not $ChkSkipLPs.Checked
+  $ChkFixInboxAppLang.Enabled = -not $ChkSkipLPs.Checked
 }
 
 function Get-FreeSpaceGB {
@@ -5485,7 +5543,7 @@ $ChkSkipUpdates.Add_CheckedChanged({ Update-UI })
 $ChkSkipLPs.Add_CheckedChanged({ Update-LangSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-AppxSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-UI })
-$ChkSkipInboxAppFix.Add_CheckedChanged({ Update-UI })
+$ChkFixInboxAppLang.Add_CheckedChanged({ Update-UI })
 $TxtPatchWim.Add_TextChanged({ Update-UI })
 $TxtSource.Add_TextChanged({ Start-ISOProbe })
 
@@ -5931,7 +5989,7 @@ $Script:RunClick = {
 
   if ($ChkSkipUpdates.Checked)  { $argList += "-SkipUpdates" }
   if ($ChkSkipLPs.Checked)      { $argList += "-SkipLanguagePacks" }
-  if ($ChkSkipInboxAppFix.Checked -and $ChkSkipInboxAppFix.Enabled) { $argList += "-SkipInboxAppLanguageFix" }
+  if (-not $ChkFixInboxAppLang.Checked -and $ChkFixInboxAppLang.Enabled) { $argList += "-SkipInboxAppLanguageFix" }
   # NOTE: -SkipAppxRemoval is NOT added here even when $ChkSkipAppx.Checked is true.
   # Checking that box (via Update-AppxSkipState) forces every app checkbox to
   # $false, so $checkedPkgs.Count is already 0 and the block above already added
