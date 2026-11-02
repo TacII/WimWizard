@@ -14,11 +14,23 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.15.0
+  Version : 2.15.1
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.15.1 Fix: after a build, the console showed "You cannot call a method on a
+         null-valued expression" at $t.Stop(); $t.Dispose() every 2 s, and the
+         completion panel came back after OK. Root cause: both build timer
+         ticks stopped the timer stored in $Script:BuildTimer instead of the
+         timer that fired. When a second build timer was ticking, whichever
+         tick came second found $Script:BuildTimer already null, threw
+         (non-terminating, so the rest of the handler still ran and re-showed
+         the panel) and was never stopped. The 2.4.29 local-variable capture
+         only prevented a double Dispose on the stored timer; it did not stop
+         the timer that fired. Each tick now stops its own sender and only
+         the current timer handles completion; any other tick logs a [WARN]
+         line to the console. Why a second timer existed is not established.
   2.15.0 Fix: Patch WIM, SCCM source, "Create new package" overwrote the
          original package's WIM. The post-build copy back to the package's
          source path ran unconditionally, before the CreateNew branch, so the
@@ -1656,7 +1668,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.15.0"
+$WimWizardVersion = "2.15.1"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -6142,9 +6154,21 @@ $Script:RunClick = {
     $Script:BuildTimer = New-Object System.Windows.Forms.Timer
     $Script:BuildTimer.Interval = 2000
     $Script:BuildTimer.Add_Tick({
+      param($s, $e)
       if ($Script:BuildProc -and $Script:BuildProc.HasExited) {
-        $t = $Script:BuildTimer; $Script:BuildTimer = $null
-        $t.Stop(); $t.Dispose()
+        # Stop the timer that fired ($s), not whatever $Script:BuildTimer holds.
+        # A tick from any other timer (not the one stored for this run) stops
+        # itself and leaves completion handling to the current timer; before
+        # 2.15.1 such a tick found $Script:BuildTimer already null, threw
+        # InvokeMethodOnNull, kept running and re-showed the completion panel
+        # every 2 s.
+        $s.Stop(); $s.Dispose()
+        if (-not [object]::ReferenceEquals($s, $Script:BuildTimer)) {
+          $_cur = if ($Script:BuildTimer) { 'another timer' } else { 'none' }
+          Write-Host "[WARN] GUI: tick from a build timer that is not the current one (current: $_cur) - stopped, completion not repeated." -ForegroundColor Yellow
+          return
+        }
+        $Script:BuildTimer = $null
         Remove-Item -Path $Script:LauncherPath -Force -ErrorAction SilentlyContinue
         $Form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
         $Form.BringToFront()
@@ -6505,9 +6529,21 @@ $Script:RunClick = {
   $Script:BuildTimer = New-Object System.Windows.Forms.Timer
   $Script:BuildTimer.Interval = 2000
   $Script:BuildTimer.Add_Tick({
+    param($s, $e)
     if ($Script:BuildProc -and $Script:BuildProc.HasExited) {
-      $t = $Script:BuildTimer; $Script:BuildTimer = $null
-      $t.Stop(); $t.Dispose()
+      # Stop the timer that fired ($s), not whatever $Script:BuildTimer holds.
+      # A tick from any other timer (not the one stored for this run) stops
+      # itself and leaves completion handling to the current timer; before
+      # 2.15.1 such a tick found $Script:BuildTimer already null, threw
+      # InvokeMethodOnNull, kept running and re-showed the completion panel
+      # every 2 s.
+      $s.Stop(); $s.Dispose()
+      if (-not [object]::ReferenceEquals($s, $Script:BuildTimer)) {
+        $_cur = if ($Script:BuildTimer) { 'another timer' } else { 'none' }
+        Write-Host "[WARN] GUI: tick from a build timer that is not the current one (current: $_cur) - stopped, completion not repeated." -ForegroundColor Yellow
+        return
+      }
+      $Script:BuildTimer = $null
       Remove-Item -Path $Script:LauncherPath -Force -ErrorAction SilentlyContinue
       $Form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
       $Form.BringToFront()
