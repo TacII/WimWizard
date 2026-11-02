@@ -6,7 +6,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 
 Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 
-<img width="762" height="660" alt="image" src="https://github.com/user-attachments/assets/03817bd2-4fb3-4d8b-a30a-c740f5f4d42b" />
+<img width="764" height="659" alt="image" src="https://github.com/user-attachments/assets/1c2f43b6-1b18-4720-a4d5-2a082db6439b" />
 
 ## Features
 
@@ -29,7 +29,8 @@ Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 - **Completion screen** — GUI minimizes while the build runs, restores and shows a completion screen when done
 - **ISO version probe** — GUI reads the Windows ISO at startup (from filename or by mounting) to display the real build number in the filename preview
 - **26H2 support** - Wim Wizard supports Windows 26H2, tested! 
-- **Driver injection** - GUI lets you browse and select drivers to inject into your ISO. Folders can be selected with parameter as well. 
+- **Driver injection** - GUI lets you browse and select drivers to inject into your ISO. Folders can be selected with parameter as well.
+- **Defnder update** - Wim Wizard automatically downnloads and updates Windows Defender to the latest version. 
 ---
 
 ## Requirements
@@ -183,6 +184,7 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 | `-SCCMPackageID` | Existing package to update — omit to create a new package |
 | `-SCCMUpdateDPs` | Trigger a distribution point update after import |
 | `-SCCMDPGroup` | Distribution point group to add the package to (`Start-CMContentDistribution`); independent of `-SCCMUpdateDPs` |
+| `-SkipDefenderUpdate | Doesn't download or update Windows Defender on the image.
 | `-DebugBuild` | Extra diagnostics: full DISM output and pending package dumps in log |
 | `-Help` | Show help |                                                                       |
 
@@ -190,9 +192,9 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 
 | Component         | Version                         |
 | ----------------- | -------------------------------- |
-| WimWizard.ps1     | 5.6.0                            |
-| WimWizard-GUI.ps1 | 2.12.3                            |
-| Windows 11 target | 25H2 (26200.x) / 24H2 (26100.x) |
+| WimWizard.ps1     | 5.7.2                            |
+| WimWizard-GUI.ps1 | 2.15.0                            |
+| Windows 11 target | 26H2 (26200.x)                 |
 
 ---
 
