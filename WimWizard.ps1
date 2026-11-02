@@ -214,12 +214,23 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.7.2
+    Version     : 5.7.3
     Date        : 2026-11-02
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.7.3  Fix: -SkipUpdates (and runs where no update path resolved) silently
+           skipped drivers, language packs, language FoDs, RSAT FoDs, component
+           cleanup and NetFx3, although the pre-run summary listed the FoDs.
+           Root cause: all of PART 2 (install.wim steps 9-15, incl. driver
+           injection) sat inside if (-not $SkipUpdates -and $resolvedUpdatePath),
+           which only update enumeration and WinRE patching need. Not caught
+           because the test matrix checks exit codes only and has no
+           -SkipUpdates case. The guard ($applyUpdates) now covers enumeration +
+           WinRE only; steps 9/13/15b already gate on $lcuFile/$dotNetFiles,
+           which are now initialised before the block (StrictMode). Step 14
+           cleanup now also runs without updates.
     5.7.2  Fix: Test-SCCMSourceStable never worked. It runs inside
            Add-SCCMPackageToDPGroup after Push-Location to the CM site drive,
            and an unqualified UNC path is resolved against the current
@@ -663,7 +674,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.7.2"
+$ScriptVersion = "5.7.3"
 $MinFreeSpaceGB = 30   # Minimum recommended free space at the output path
 
 # PowerShell has no native "/?" convention (that's cmd.exe/DOS) - "-?" is
@@ -3078,8 +3089,19 @@ try {
     #   2. Patch install.wim:       SSU → LP → FoD → Full LCU → Cleanup → NetFx3 → .NET CU
     # ═══════════════════════════════════════════════════════════════════════════
 
-    $dotNetFiles = @()
-    if (-not $SkipUpdates -and $resolvedUpdatePath) {
+    # Update-derived state. Initialised here because the install.wim steps below
+    # (drivers, LP, FoD, cleanup, NetFx3) run whether or not updates are applied,
+    # and Set-StrictMode -Version Latest throws on reads of unassigned variables.
+    # Only update enumeration and WinRE patching are inside the $applyUpdates block;
+    # the update steps in PART 2 gate themselves on $lcuFile / $dotNetFiles.
+    $allUpdateFiles = @()
+    $safeOSFiles    = @()
+    $dotNetFiles    = @()
+    $lcuFile        = $null
+    $checkpointFile = $null
+    $lcuAllFiles    = @()
+    $applyUpdates   = (-not $SkipUpdates) -and [bool]$resolvedUpdatePath
+    if ($applyUpdates) {
 
         # Enumerate update files
         $allUpdateFiles = @(
@@ -3234,270 +3256,274 @@ try {
         } else {
             Write-Info "No LCU or SafeOS files found - skipping WinRE patching"
         }
+    } # end if ($applyUpdates) - update enumeration + WinRE patching
 
-        # ── PART 2: Patch install.wim ──────────────────────────────────────────
-        # Per Microsoft docs sequence for install.wim:
-        #   Drivers: injected first (not a CBS component, no ordering
-        #            constraint relative to LCU/LP/FoD - runs first so a bad
-        #            driver fails fast instead of after update installation)
-        #   Step 9:  SSU via LCU
-        #   Step 10: Language Pack
-        #   Step 11: Features on Demand
-        #   Step 13: Full LCU (second pass)
-        #   Step 14: Cleanup /StartComponentCleanup (NO /ResetBase)
-        #   Step 15: NetFx3 + .NET CU
+    # ── PART 2: Patch install.wim ──────────────────────────────────────────
+    # Per Microsoft docs sequence for install.wim:
+    #   Drivers: injected first (not a CBS component, no ordering
+    #            constraint relative to LCU/LP/FoD - runs first so a bad
+    #            driver fails fast instead of after update installation)
+    #   Step 9:  SSU via LCU
+    #   Step 10: Language Pack
+    #   Step 11: Features on Demand
+    #   Step 13: Full LCU (second pass)
+    #   Step 14: Cleanup /StartComponentCleanup (NO /ResetBase)
+    #   Step 15: NetFx3 + .NET CU
+    #
+    # PART 2 runs with and without -SkipUpdates. Steps 9, 13 and 15b gate on
+    # $lcuFile / $dotNetFiles, which stay empty when updates are not applied.
+    # Everything else (drivers, LP, FoD, cleanup, NetFx3) must stay outside
+    # the $applyUpdates block above.
 
-        # Drivers: full build only (forced off in patch mode earlier in the script)
-        if ($DriverPath -ne "" -or $DriverListPath -ne "") {
-            Install-WimWizardDrivers -MountDir $mountDir -ScratchDir $scratchDir `
-                -DriverPath $DriverPath -DriverListPath $DriverListPath
-        }
+    # Drivers: full build only (forced off in patch mode earlier in the script)
+    if ($DriverPath -ne "" -or $DriverListPath -ne "") {
+        Install-WimWizardDrivers -MountDir $mountDir -ScratchDir $scratchDir `
+            -DriverPath $DriverPath -DriverListPath $DriverListPath
+    }
 
-        # Step 9: SSU via LCU (first pass)
-        if ($lcuFile) {
-            Write-Section "install.wim - Step 9: SSU via LCU (pass 1)"
-            # Copy LCU + checkpoint to isolated temp folder with original filenames
-            $lcuTempDir = Join-Path $workRoot "LCU_temp"
-            New-Item $lcuTempDir -ItemType Directory -Force | Out-Null
-            foreach ($f in $lcuAllFiles) { Copy-Item $f.FullName $lcuTempDir }
-            $lcuTempTarget = Join-Path $lcuTempDir $lcuFile.Name
+    # Step 9: SSU via LCU (first pass)
+    if ($lcuFile) {
+        Write-Section "install.wim - Step 9: SSU via LCU (pass 1)"
+        # Copy LCU + checkpoint to isolated temp folder with original filenames
+        $lcuTempDir = Join-Path $workRoot "LCU_temp"
+        New-Item $lcuTempDir -ItemType Directory -Force | Out-Null
+        foreach ($f in $lcuAllFiles) { Copy-Item $f.FullName $lcuTempDir }
+        $lcuTempTarget = Join-Path $lcuTempDir $lcuFile.Name
 
-            Write-Host "  >> LCU: $($lcuFile.Name)" -ForegroundColor White
-            Write-Info "     Applying LCU pass 1 - this takes ~25 minutes..."
-            try {
-                # Use dism.exe - Add-WindowsPackage fails with 0x800401e3 on KB5083769 Apr 2026
-                $dismResult = & dism.exe /Image:$mountDir /Add-Package /PackagePath:$lcuTempTarget /ScratchDir:$scratchDir 2>&1
-                if ($LASTEXITCODE -eq 0) {
-                    Write-OK "LCU pass 1 installed"
-                    Write-Log "LCU pass 1 OK: $($lcuFile.Name)"
-                } elseif ($LASTEXITCODE -eq -2146498530) {
-                    Write-Warn "LCU pass 1 not applicable (0x800f081e) - skipping"
-                    Write-Log "WARN 0x800f081e LCU pass 1" "WARN"
-                } else {
-                    $errMsg = ($dismResult | Where-Object { $_ -match "Error" }) -join " "
-                    Remove-Item $lcuTempDir -Recurse -Force -ErrorAction SilentlyContinue
-                    throw "LCU pass 1 failed (exit $LASTEXITCODE): $errMsg"
-                }
-            } catch {
-                Remove-Item $lcuTempDir -Recurse -Force -ErrorAction SilentlyContinue
-                throw
-            }
-            Remove-Item $lcuTempDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-
-        # Step 10: Language Packs
-        if (-not $SkipLanguagePacks) {
-            Write-Section "install.wim - Step 10: Language Packs"
-            foreach ($lang in $ResolvedLocales) {
-                Write-Host ""
-                Write-Host "  >> $($lang.ToUpper())" -ForegroundColor White
-
-                # LP cab - Add-WindowsPackage with file path (same as Microsoft)
-                $lp = $allLPCabs | Where-Object { $_.Name -match "Language-Pack_${lpArchStr}_$lang" } | Select-Object -First 1
-                if ($lp) {
-                    try {
-                        Add-WindowsPackage -PackagePath $lp.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
-                        Write-OK "LP: $($lp.Name)"
-                        Write-Log "LP: $($lp.FullName)"
-                    } catch {
-                        $err = $_.Exception.Message
-                        if ($err -match "0x800f0952") {
-                            # Package already present in base image (e.g. en-GB in LTSC 2024 English International)
-                            Write-Info "LP $lang already present in base image (0x800f0952) - skipping"
-                            Write-Log "LP $lang skipped - already in base image (0x800f0952)" "INFO"
-                        } elseif ($err -match "0x800f081e") {
-                            Write-Info "LP $lang not applicable (0x800f081e) - skipping"
-                            Write-Log "LP $lang skipped - not applicable (0x800f081e)" "INFO"
-                        } else {
-                            throw
-                        }
-                    }
-                } else {
-                    Write-Warn "LP not found for $lang"
-                    Write-Log "WARN: LP not found for $lang" "WARN"
-                }
-
-                # Font support
-                $FontTagMap = @{
-                    'ar-SA'='Arab'; 'he-IL'='Hebr'; 'ja-JP'='Jpan'
-                    'ko-KR'='Kore'; 'th-TH'='Thai'; 'zh-CN'='Hans'; 'zh-TW'='Hant'
-                }
-                if ($FontTagMap.ContainsKey($lang)) {
-                    $tag = $FontTagMap[$lang]
-                    Add-WindowsCapability -Name "Language.Fonts.$tag~~~und-$tag~0.0.1.0" `
-                        -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir -ErrorAction SilentlyContinue | Out-Null
-                    Write-OK "  Font capability [$tag]"
-                    Write-Log "Font capability [$tag]: OK"
-                }
-            }
-
-            # Offline registry: preserve installed language FODs
-            Write-Info "Configuring offline registry to preserve language FODs..."
-            try {
-                $offlineSoftware = "$mountDir\Windows\System32\config\SOFTWARE"
-                reg load "HKLM\WW_SOFTWARE" $offlineSoftware | Out-Null
-                reg add "HKLM\WW_SOFTWARE\Policies\Microsoft\Control Panel\International" `
-                    /v "BlockCleanupOfUnusedPreinstalledLangPacks" /t REG_DWORD /d 1 /f | Out-Null
-                foreach ($locale in $ResolvedLocales) {
-                    reg add "HKLM\WW_SOFTWARE\Microsoft\Windows NT\CurrentVersion\MUI\UILanguages\$locale" /f | Out-Null
-                    Write-Log "MUI UILanguages registered: $locale"
-                }
-                [GC]::Collect(); Start-Sleep -Seconds 1
-                reg unload "HKLM\WW_SOFTWARE" | Out-Null
-                Write-OK "Offline registry: language cleanup suppressed for $($ResolvedLocales -join ', ')"
-                Write-Log "Registry: BlockCleanupOfUnusedPreinstalledLangPacks=1, locales registered: $($ResolvedLocales -join ', ')"
-            } catch {
-                Write-Warn "Could not configure offline registry: $($_.Exception.Message)"
-                try { reg unload "HKLM\WW_SOFTWARE" 2>$null | Out-Null } catch {}
-            }
-        }
-
-        # Step 11: Features on Demand
-        # Per Microsoft: Add-WindowsCapability with capability names, Source = FOD ISO path
-        # Language FODs use capability names (Language.Basic~~~sv-SE~0.0.1.0 etc)
-        # NOTE: NetFx3 goes to step 15 (after cleanup), not here
-        Write-Section "install.wim - Step 11: Features on Demand"
-
-        if (-not $SkipLanguagePacks) {
-            foreach ($lang in $ResolvedLocales) {
-                Write-Host "  >> Language FoDs: $($lang.ToUpper())" -ForegroundColor White
-                foreach ($fodType in @("Basic","OCR","Handwriting","TextToSpeech","Speech")) {
-                    $capName = "Language.$fodType~~~$lang~0.0.1.0"
-                    try {
-                        Add-WindowsCapability -Name $capName -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir | Out-Null
-                        Write-OK "  $fodType"
-                        Write-Log "Language FoD OK: $capName"
-                    } catch {
-                        $err = $_.Exception.Message
-                        if ($err -match "0x800f081e" -or $err -match "not present\|not applicable") {
-                            Write-Info "  $fodType not available for $lang - skipping"
-                        } else {
-                            Write-Warn "  $fodType failed: $err"
-                            Write-Log "WARN Language FoD $capName`: $err" "WARN"
-                        }
-                    }
-                }
-            }
-        }
-
-        # RSAT and other non-NetFx3 FoDs
-        if ($FoDList -ne "") {
-            $FoDCatalog = @{
-                'RsatAD'     = @{ Label = "RSAT: Active Directory"; Name = "Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0" }
-                'RsatGPO'    = @{ Label = "RSAT: Group Policy Management"; Name = "Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0" }
-                'RsatSrvMgr' = @{ Label = "RSAT: Server Manager"; Name = "Rsat.ServerManager.Tools~~~~0.0.1.0" }
-            }
-            $fodKeys = $FoDList.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" -and $_ -ne "NetFx3" }
-            foreach ($key in $fodKeys) {
-                if (-not $FoDCatalog.ContainsKey($key)) { Write-Warn "Unknown FoD key: $key - skipping"; continue }
-                $fod = $FoDCatalog[$key]
-                Write-Host "  >> $($fod.Label)" -ForegroundColor White
-                try {
-                    Add-WindowsCapability -Name $fod.Name -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir | Out-Null
-                    Write-OK "$($fod.Label) enabled"
-                    Write-Log "FoD OK: $($fod.Label)"
-                } catch {
-                    $err = $_.Exception.Message
-                    if ($err -match "0x800f081e") {
-                        Write-Info "$($fod.Label) already present - skipping"
-                    } else {
-                        Write-Warn "$($fod.Label) failed: $err"
-                        Write-Log "WARN FoD $($fod.Label): $err" "WARN"
-                    }
-                }
-            }
-        }
-
-        # Step 13: Full LCU (second pass, after LP/FoD)
-        if ($lcuFile) {
-            Write-Section "install.wim - Step 13: Full LCU (pass 2, after LP/FoD)"
-            $lcuTempDir2 = Join-Path $workRoot "LCU_temp2"
-            New-Item $lcuTempDir2 -ItemType Directory -Force | Out-Null
-            foreach ($f in $lcuAllFiles) { Copy-Item $f.FullName $lcuTempDir2 }
-            $lcuTempTarget2 = Join-Path $lcuTempDir2 $lcuFile.Name
-
-            Write-Host "  >> LCU: $($lcuFile.Name)" -ForegroundColor White
-            Write-Info "     Applying full LCU - this takes ~25 minutes..."
-            $dismResult = & dism.exe /Image:$mountDir /Add-Package /PackagePath:$lcuTempTarget2 /ScratchDir:$scratchDir 2>&1
+        Write-Host "  >> LCU: $($lcuFile.Name)" -ForegroundColor White
+        Write-Info "     Applying LCU pass 1 - this takes ~25 minutes..."
+        try {
+            # Use dism.exe - Add-WindowsPackage fails with 0x800401e3 on KB5083769 Apr 2026
+            $dismResult = & dism.exe /Image:$mountDir /Add-Package /PackagePath:$lcuTempTarget /ScratchDir:$scratchDir 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-OK "Full LCU installed (pass 2)"
-                Write-Log "LCU pass 2 OK: $($lcuFile.Name)"
+                Write-OK "LCU pass 1 installed"
+                Write-Log "LCU pass 1 OK: $($lcuFile.Name)"
             } elseif ($LASTEXITCODE -eq -2146498530) {
-                Write-Warn "LCU pass 2 not applicable (0x800f081e) - skipping"
-                Write-Log "WARN 0x800f081e LCU pass 2" "WARN"
+                Write-Warn "LCU pass 1 not applicable (0x800f081e) - skipping"
+                Write-Log "WARN 0x800f081e LCU pass 1" "WARN"
             } else {
                 $errMsg = ($dismResult | Where-Object { $_ -match "Error" }) -join " "
-                Remove-Item $lcuTempDir2 -Recurse -Force -ErrorAction SilentlyContinue
-                throw "LCU pass 2 failed (exit $LASTEXITCODE): $errMsg"
+                Remove-Item $lcuTempDir -Recurse -Force -ErrorAction SilentlyContinue
+                throw "LCU pass 1 failed (exit $LASTEXITCODE): $errMsg"
             }
-            Remove-Item $lcuTempDir2 -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            Remove-Item $lcuTempDir -Recurse -Force -ErrorAction SilentlyContinue
+            throw
         }
+        Remove-Item $lcuTempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
-        # Step 14: Cleanup - /StartComponentCleanup only, NO /ResetBase on main OS
-        # Per Microsoft sample script: only WinRE/WinPE get /ResetBase
-        Write-Section "install.wim - Step 14: Component store cleanup"
-        Write-Info "Running /StartComponentCleanup (no /ResetBase per Microsoft docs)..."
-        if ($DebugBuild) {
-            $cleanupResult = & dism.exe /Image:$mountDir /Cleanup-Image /StartComponentCleanup /ScratchDir:$scratchDir 2>&1
-            $cleanupResult | ForEach-Object { Write-Host "    $_" -ForegroundColor Magenta; Write-Log "[DEBUG] $_" }
-        } else {
-            $cleanupResult = & dism.exe /Image:$mountDir /Cleanup-Image /StartComponentCleanup /ScratchDir:$scratchDir 2>&1
-        }
-        if ($LASTEXITCODE -eq 0) {
-            Write-OK "Component cleanup complete"
-            Write-Log "Component cleanup OK"
-        } elseif ($LASTEXITCODE -eq -2146498554) {
-            # 0x800F0806 CBS_E_PENDING - optional components require online operation
-            Write-Warn "Cleanup: pending operations (0x800F0806) - image must boot to complete. Non-fatal, continuing."
-            Write-Log "WARN: Component cleanup 0x800F0806 (pending ops)" "WARN"
-        } else {
-            Write-Warn "Component cleanup returned exit code $LASTEXITCODE (non-fatal, continuing)"
-            Write-Log "WARN: Component cleanup exit $LASTEXITCODE" "WARN"
-        }
+    # Step 10: Language Packs
+    if (-not $SkipLanguagePacks) {
+        Write-Section "install.wim - Step 10: Language Packs"
+        foreach ($lang in $ResolvedLocales) {
+            Write-Host ""
+            Write-Host "  >> $($lang.ToUpper())" -ForegroundColor White
 
-        # Step 15: NetFx3 + .NET CU
-        # NetFx3 via Add-WindowsCapability per Microsoft docs, AFTER cleanup
-        $wantNetFx3 = $FoDList -ne "" -and ($FoDList.Split(',') | ForEach-Object { $_.Trim() }) -contains 'NetFx3'
-        if ($wantNetFx3 -and $LPSearchRoot) {
-            Write-Section "install.wim - Step 15a: NetFx3 (.NET Framework 3.5)"
-            Write-Info "Installing via Add-WindowsCapability per Microsoft docs..."
-            try {
-                Add-WindowsCapability -Name "NetFX3~~~~" -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir | Out-Null
-                Write-OK "NetFx3 installed"
-                Write-Log "FoD OK: NetFx3 (step 15)"
-            } catch {
-                $err = $_.Exception.Message
-                if ($err -match "0x800f081e" -or $err -match "already installed") {
-                    Write-Info "NetFx3 already present - skipping"
-                } else {
-                    Write-Warn "NetFx3 failed: $err"
-                    Write-Log "WARN FoD NetFx3: $err" "WARN"
-                }
-            }
-        }
-
-        if ($dotNetFiles -and $dotNetFiles.Count -gt 0) {
-            Write-Section "install.wim - Step 15b: .NET CU"
-            foreach ($upd in $dotNetFiles) {
-                Write-Host "  >> .NET: $($upd.Name)" -ForegroundColor White
+            # LP cab - Add-WindowsPackage with file path (same as Microsoft)
+            $lp = $allLPCabs | Where-Object { $_.Name -match "Language-Pack_${lpArchStr}_$lang" } | Select-Object -First 1
+            if ($lp) {
                 try {
-                    Add-WindowsPackage -PackagePath $upd.FullName -Path $mountDir -IgnoreCheck -ScratchDirectory $scratchDir | Out-Null
-                    Write-OK "Installed"
-                    Write-Log ".NET OK: $($upd.Name)"
+                    Add-WindowsPackage -PackagePath $lp.FullName -Path $mountDir -ScratchDirectory $scratchDir | Out-Null
+                    Write-OK "LP: $($lp.Name)"
+                    Write-Log "LP: $($lp.FullName)"
                 } catch {
                     $err = $_.Exception.Message
-                    if ($err -match "0x800f081e") {
-                        Write-Warn "Not applicable (0x800f081e) - skipping"
-                        Write-Log "WARN 0x800f081e .NET" "WARN"
+                    if ($err -match "0x800f0952") {
+                        # Package already present in base image (e.g. en-GB in LTSC 2024 English International)
+                        Write-Info "LP $lang already present in base image (0x800f0952) - skipping"
+                        Write-Log "LP $lang skipped - already in base image (0x800f0952)" "INFO"
+                    } elseif ($err -match "0x800f081e") {
+                        Write-Info "LP $lang not applicable (0x800f081e) - skipping"
+                        Write-Log "LP $lang skipped - not applicable (0x800f081e)" "INFO"
                     } else {
-                        Write-Warn "Failed: $err"
-                        Write-Log "ERROR .NET: $err" "ERROR"
+                        throw
+                    }
+                }
+            } else {
+                Write-Warn "LP not found for $lang"
+                Write-Log "WARN: LP not found for $lang" "WARN"
+            }
+
+            # Font support
+            $FontTagMap = @{
+                'ar-SA'='Arab'; 'he-IL'='Hebr'; 'ja-JP'='Jpan'
+                'ko-KR'='Kore'; 'th-TH'='Thai'; 'zh-CN'='Hans'; 'zh-TW'='Hant'
+            }
+            if ($FontTagMap.ContainsKey($lang)) {
+                $tag = $FontTagMap[$lang]
+                Add-WindowsCapability -Name "Language.Fonts.$tag~~~und-$tag~0.0.1.0" `
+                    -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir -ErrorAction SilentlyContinue | Out-Null
+                Write-OK "  Font capability [$tag]"
+                Write-Log "Font capability [$tag]: OK"
+            }
+        }
+
+        # Offline registry: preserve installed language FODs
+        Write-Info "Configuring offline registry to preserve language FODs..."
+        try {
+            $offlineSoftware = "$mountDir\Windows\System32\config\SOFTWARE"
+            reg load "HKLM\WW_SOFTWARE" $offlineSoftware | Out-Null
+            reg add "HKLM\WW_SOFTWARE\Policies\Microsoft\Control Panel\International" `
+                /v "BlockCleanupOfUnusedPreinstalledLangPacks" /t REG_DWORD /d 1 /f | Out-Null
+            foreach ($locale in $ResolvedLocales) {
+                reg add "HKLM\WW_SOFTWARE\Microsoft\Windows NT\CurrentVersion\MUI\UILanguages\$locale" /f | Out-Null
+                Write-Log "MUI UILanguages registered: $locale"
+            }
+            [GC]::Collect(); Start-Sleep -Seconds 1
+            reg unload "HKLM\WW_SOFTWARE" | Out-Null
+            Write-OK "Offline registry: language cleanup suppressed for $($ResolvedLocales -join ', ')"
+            Write-Log "Registry: BlockCleanupOfUnusedPreinstalledLangPacks=1, locales registered: $($ResolvedLocales -join ', ')"
+        } catch {
+            Write-Warn "Could not configure offline registry: $($_.Exception.Message)"
+            try { reg unload "HKLM\WW_SOFTWARE" 2>$null | Out-Null } catch {}
+        }
+    }
+
+    # Step 11: Features on Demand
+    # Per Microsoft: Add-WindowsCapability with capability names, Source = FOD ISO path
+    # Language FODs use capability names (Language.Basic~~~sv-SE~0.0.1.0 etc)
+    # NOTE: NetFx3 goes to step 15 (after cleanup), not here
+    Write-Section "install.wim - Step 11: Features on Demand"
+
+    if (-not $SkipLanguagePacks) {
+        foreach ($lang in $ResolvedLocales) {
+            Write-Host "  >> Language FoDs: $($lang.ToUpper())" -ForegroundColor White
+            foreach ($fodType in @("Basic","OCR","Handwriting","TextToSpeech","Speech")) {
+                $capName = "Language.$fodType~~~$lang~0.0.1.0"
+                try {
+                    Add-WindowsCapability -Name $capName -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir | Out-Null
+                    Write-OK "  $fodType"
+                    Write-Log "Language FoD OK: $capName"
+                } catch {
+                    $err = $_.Exception.Message
+                    if ($err -match "0x800f081e" -or $err -match "not present\|not applicable") {
+                        Write-Info "  $fodType not available for $lang - skipping"
+                    } else {
+                        Write-Warn "  $fodType failed: $err"
+                        Write-Log "WARN Language FoD $capName`: $err" "WARN"
                     }
                 }
             }
         }
+    }
 
-    } # end if (-not $SkipUpdates)
+    # RSAT and other non-NetFx3 FoDs
+    if ($FoDList -ne "") {
+        $FoDCatalog = @{
+            'RsatAD'     = @{ Label = "RSAT: Active Directory"; Name = "Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0" }
+            'RsatGPO'    = @{ Label = "RSAT: Group Policy Management"; Name = "Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0" }
+            'RsatSrvMgr' = @{ Label = "RSAT: Server Manager"; Name = "Rsat.ServerManager.Tools~~~~0.0.1.0" }
+        }
+        $fodKeys = $FoDList.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" -and $_ -ne "NetFx3" }
+        foreach ($key in $fodKeys) {
+            if (-not $FoDCatalog.ContainsKey($key)) { Write-Warn "Unknown FoD key: $key - skipping"; continue }
+            $fod = $FoDCatalog[$key]
+            Write-Host "  >> $($fod.Label)" -ForegroundColor White
+            try {
+                Add-WindowsCapability -Name $fod.Name -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir | Out-Null
+                Write-OK "$($fod.Label) enabled"
+                Write-Log "FoD OK: $($fod.Label)"
+            } catch {
+                $err = $_.Exception.Message
+                if ($err -match "0x800f081e") {
+                    Write-Info "$($fod.Label) already present - skipping"
+                } else {
+                    Write-Warn "$($fod.Label) failed: $err"
+                    Write-Log "WARN FoD $($fod.Label): $err" "WARN"
+                }
+            }
+        }
+    }
+
+    # Step 13: Full LCU (second pass, after LP/FoD)
+    if ($lcuFile) {
+        Write-Section "install.wim - Step 13: Full LCU (pass 2, after LP/FoD)"
+        $lcuTempDir2 = Join-Path $workRoot "LCU_temp2"
+        New-Item $lcuTempDir2 -ItemType Directory -Force | Out-Null
+        foreach ($f in $lcuAllFiles) { Copy-Item $f.FullName $lcuTempDir2 }
+        $lcuTempTarget2 = Join-Path $lcuTempDir2 $lcuFile.Name
+
+        Write-Host "  >> LCU: $($lcuFile.Name)" -ForegroundColor White
+        Write-Info "     Applying full LCU - this takes ~25 minutes..."
+        $dismResult = & dism.exe /Image:$mountDir /Add-Package /PackagePath:$lcuTempTarget2 /ScratchDir:$scratchDir 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "Full LCU installed (pass 2)"
+            Write-Log "LCU pass 2 OK: $($lcuFile.Name)"
+        } elseif ($LASTEXITCODE -eq -2146498530) {
+            Write-Warn "LCU pass 2 not applicable (0x800f081e) - skipping"
+            Write-Log "WARN 0x800f081e LCU pass 2" "WARN"
+        } else {
+            $errMsg = ($dismResult | Where-Object { $_ -match "Error" }) -join " "
+            Remove-Item $lcuTempDir2 -Recurse -Force -ErrorAction SilentlyContinue
+            throw "LCU pass 2 failed (exit $LASTEXITCODE): $errMsg"
+        }
+        Remove-Item $lcuTempDir2 -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # Step 14: Cleanup - /StartComponentCleanup only, NO /ResetBase on main OS
+    # Per Microsoft sample script: only WinRE/WinPE get /ResetBase
+    Write-Section "install.wim - Step 14: Component store cleanup"
+    Write-Info "Running /StartComponentCleanup (no /ResetBase per Microsoft docs)..."
+    if ($DebugBuild) {
+        $cleanupResult = & dism.exe /Image:$mountDir /Cleanup-Image /StartComponentCleanup /ScratchDir:$scratchDir 2>&1
+        $cleanupResult | ForEach-Object { Write-Host "    $_" -ForegroundColor Magenta; Write-Log "[DEBUG] $_" }
+    } else {
+        $cleanupResult = & dism.exe /Image:$mountDir /Cleanup-Image /StartComponentCleanup /ScratchDir:$scratchDir 2>&1
+    }
+    if ($LASTEXITCODE -eq 0) {
+        Write-OK "Component cleanup complete"
+        Write-Log "Component cleanup OK"
+    } elseif ($LASTEXITCODE -eq -2146498554) {
+        # 0x800F0806 CBS_E_PENDING - optional components require online operation
+        Write-Warn "Cleanup: pending operations (0x800F0806) - image must boot to complete. Non-fatal, continuing."
+        Write-Log "WARN: Component cleanup 0x800F0806 (pending ops)" "WARN"
+    } else {
+        Write-Warn "Component cleanup returned exit code $LASTEXITCODE (non-fatal, continuing)"
+        Write-Log "WARN: Component cleanup exit $LASTEXITCODE" "WARN"
+    }
+
+    # Step 15: NetFx3 + .NET CU
+    # NetFx3 via Add-WindowsCapability per Microsoft docs, AFTER cleanup
+    $wantNetFx3 = $FoDList -ne "" -and ($FoDList.Split(',') | ForEach-Object { $_.Trim() }) -contains 'NetFx3'
+    if ($wantNetFx3 -and $LPSearchRoot) {
+        Write-Section "install.wim - Step 15a: NetFx3 (.NET Framework 3.5)"
+        Write-Info "Installing via Add-WindowsCapability per Microsoft docs..."
+        try {
+            Add-WindowsCapability -Name "NetFX3~~~~" -Path $mountDir -Source $LPSearchRoot -ScratchDirectory $scratchDir | Out-Null
+            Write-OK "NetFx3 installed"
+            Write-Log "FoD OK: NetFx3 (step 15)"
+        } catch {
+            $err = $_.Exception.Message
+            if ($err -match "0x800f081e" -or $err -match "already installed") {
+                Write-Info "NetFx3 already present - skipping"
+            } else {
+                Write-Warn "NetFx3 failed: $err"
+                Write-Log "WARN FoD NetFx3: $err" "WARN"
+            }
+        }
+    }
+
+    if ($dotNetFiles -and $dotNetFiles.Count -gt 0) {
+        Write-Section "install.wim - Step 15b: .NET CU"
+        foreach ($upd in $dotNetFiles) {
+            Write-Host "  >> .NET: $($upd.Name)" -ForegroundColor White
+            try {
+                Add-WindowsPackage -PackagePath $upd.FullName -Path $mountDir -IgnoreCheck -ScratchDirectory $scratchDir | Out-Null
+                Write-OK "Installed"
+                Write-Log ".NET OK: $($upd.Name)"
+            } catch {
+                $err = $_.Exception.Message
+                if ($err -match "0x800f081e") {
+                    Write-Warn "Not applicable (0x800f081e) - skipping"
+                    Write-Log "WARN 0x800f081e .NET" "WARN"
+                } else {
+                    Write-Warn "Failed: $err"
+                    Write-Log "ERROR .NET: $err" "ERROR"
+                }
+            }
+        }
+    }
 
     # Appx removal
     if (-not $SkipAppxRemoval) {
