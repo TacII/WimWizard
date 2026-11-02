@@ -17,6 +17,7 @@
       - Downloads the latest Patch Tuesday updates from Microsoft Update Catalog
       - Injects language packs and FOD for chosen languages (default: se,no,dk,fi)
       - Removes unnecessary provisioned Appx packages
+      - Updates Microsoft Defender offline (KB4568292 defender-update-kit)
       - Exports and compresses the finished WIM
 
 .PARAMETER SourceFolder
@@ -77,6 +78,17 @@
     -SkipLanguagePacks is set (or no -Languages was supplied), so this switch is
     for explicitly disabling it even on a localized build - e.g. while diagnosing
     reported failures in the winget reinstall step itself.
+
+.PARAMETER SkipDefenderUpdate
+    Skip the offline Microsoft Defender update. By default, every build (full
+    and patch mode) downloads Microsoft's defender-update-kit-<arch>.zip
+    (KB4568292) and copies the current Defender platform, engine and security
+    intelligence into the image, so new deployments are not running inbox
+    Defender binaries until their first online update. The kit's cab must carry
+    a valid Microsoft Corporation signature. The zip is cached in
+    <ScriptFolder>\DefenderKit\ and the cached copy is used (with a warning) if
+    the download fails. Any failure in this step is non-fatal: the build
+    continues without the Defender update.
 
 .PARAMETER PatchExistingWim
     Path to an existing serviced WIM file to patch with new updates only.
@@ -202,12 +214,75 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.6.0
-    Date        : 2026-09-21
+    Version     : 5.7.2
+    Date        : 2026-11-02
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.7.2  Fix: Test-SCCMSourceStable never worked. It runs inside
+           Add-SCCMPackageToDPGroup after Push-Location to the CM site drive,
+           and an unqualified UNC path is resolved against the current
+           location's provider (CMSite), so Test-Path/Get-Item failed on every
+           attempt and the check always reported the source WIM as unstable
+           after ~9 s. Only visible as a [WARN] line, which is why it went
+           unnoticed since 5.2.6. The path is now provider-qualified
+           (Microsoft.PowerShell.Core\FileSystem::) inside the function, which
+           covers every call site regardless of current location.
+           Fix: Patch mode filename carried a stale build number. The
+           auto-generated name keeps the source filename and only swaps the
+           date, and it is decided before servicing, so a newer LCU never
+           showed in the name (2026-11-02: KB5134133 applied, file still named
+           26300.9457 like the October source). After export, the build.UBR is
+           now read from the exported image (Get-WindowsImage Version, the same
+           property the normal build path names from) and the build token in
+           the filename is replaced. Only applies when the name was
+           auto-generated; a filename given via -OutputPath or typed at the
+           prompt is never renamed. Skipped with a log line if the target
+           exists or no build token is found.
+    5.7.1  Change: $DefenderKitScriptKnownHash baseline set from the first real
+           run (kit package 1.459.91.0, downloaded 2026-10-05). That run
+           applied the kit successfully: platform 4.18.26080.4-0 in
+           ProgramData\Microsoft\Windows Defender\Platform, definitions in
+           Definition Updates\Updates, marker in Windows\Temp (marker arch
+           value is "amd64fre", which passes the -notmatch "amd64" check, same
+           as Microsoft's script). From now on a changed kit script gives a
+           warning instead of the "no baseline" info line.
+    5.7.0  New: Offline Microsoft Defender update (KB4568292), on by default,
+           disabled with -SkipDefenderUpdate. Install images ship with
+           Defender platform/engine/definitions from media build time, and a
+           new deployment runs those until its first online Defender update.
+           Microsoft publishes defender-update-kit-<arch>.zip behind a stable
+           fwlink and refreshes the zip in place, so it is downloaded on every
+           build (cached in <ScriptFolder>\DefenderKit\, cached copy used with a
+           warning if the download fails). The cache is deliberately not the
+           Updates folder: every .cab there is applied with Add-WindowsPackage.
+           Microsoft's DefenderUpdateWinImage.ps1 is not called: it mounts and
+           commits the image itself (Mount-WindowsImage -ImagePath/-Index),
+           which collides with the single mount session on $workWim and would
+           cost an extra mount/commit cycle if run after the save. Its AddUpdate
+           action is file copying only (cab\Definition Updates\Updates and
+           cab\Platform into ProgramData\Microsoft\Windows Defender, plus the
+           package-defender.xml marker into Windows\Temp), so that is
+           reimplemented inside the existing mount, after the final cleanup and
+           before the save. If the marker already exists (patch mode on a WIM
+           that already got the kit), the folders Microsoft's RemoveUpdate
+           clears are emptied first. Both were verified empty in a stock 26H2
+           install.wim and in a WimWizard-built 26H2 image, so this only
+           removes earlier kit content. Validation before mount: Authenticode
+           status Valid AND signer O=Microsoft Corporation on the cab
+           (Microsoft's script checks status only), expected cab layout, and
+           package-defender.xml arch vs the image's actual architecture (read
+           from the copied WIM, not -X64/-ARM64, which patch mode doesn't
+           derive from the WIM). Drift detection: a whitespace-insensitive
+           SHA256 of the kit script's unsigned body is compared against
+           $DefenderKitScriptKnownHash and a warning is shown if Microsoft
+           changed the script (baseline empty until set from a first run). All
+           failures are non-fatal; a failed copy is rolled back to the stock
+           state (empty Updates/Platform, no marker). Only a failed rollback
+           aborts the build, since a partial Platform folder must not be saved.
+           Defender result is shown in the DONE summary and the log.
+           ARM64 uses the ARM link from the KB page; not tested.
     5.6.0  New: -WindowsISOPath parameter. Resolve-SourceFolder previously
            always auto-detected the Windows OS ISO by filename pattern, with
            no way to pin a specific file - if -SourceFolder held more than
@@ -559,6 +634,7 @@ param(
                                             # That fix only matters when a language pack was actually
                                             # injected - it's a no-op (and already skipped) whenever
                                             # -SkipLanguagePacks is set or no LP was applied.
+    [switch]$SkipDefenderUpdate,           # Skip the offline Defender update (KB4568292 defender-update-kit).
     [string]$PatchExistingWim = "",         # Path to existing serviced WIM to patch (updates only).
                                             # When set: skips ISO discovery, LP injection, Appx removal.
                                             # Languages and build info are read from the WIM itself.
@@ -587,7 +663,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.6.0"
+$ScriptVersion = "5.7.2"
 $MinFreeSpaceGB = 30   # Minimum recommended free space at the output path
 
 # PowerShell has no native "/?" convention (that's cmd.exe/DOS) - "-?" is
@@ -710,6 +786,7 @@ if ($Help) {
     Write-Host "  -SkipAppxRemoval           Skip removal of provisioned Appx packages"
     Write-Host "  -SkipInboxAppLanguageFix   Skip the RunOnce winget reinstall of kept inbox apps"
     Write-Host "                             (see -Help remarks; already skipped when no LP is applied)"
+    Write-Host "  -SkipDefenderUpdate        Skip the offline Defender platform/engine/definitions update"
     Write-Host "  -DebugBuild                Extra diagnostics: full DISM output for all steps + pending package dump"
     Write-Host "  -Unattended                No interactive prompts (for GUI/automation use)"
     Write-Host "  -SCCMImport                Import finished WIM into SCCM after build (requires CM console)"
@@ -2499,6 +2576,12 @@ $OutputPath = Read-PathWithDefault `
     -Prompt  "Path for the finished WIM file (including filename):" `
     -Default $OutputPath
 
+# Patch mode: the auto-generated name copies the build number from the source
+# filename, which is stale once a newer LCU is applied. Remember whether the
+# final name is the auto-generated one, so it can be corrected after export
+# (a filename the user typed is never renamed).
+$script:PatchAutoNamed = $PatchMode -and ([System.IO.Path]::GetFileName($OutputPath) -eq $_autoName)
+
 $outputDir = Split-Path $OutputPath -Parent
 if (-not $outputDir) { $outputDir = Split-Path $OutputPath -Qualifier }  # fallback for root drive paths
 if (-not (Test-Path $outputDir)) { New-Item $outputDir -ItemType Directory -Force | Out-Null; Write-OK "Created: $outputDir" }
@@ -2637,11 +2720,277 @@ if ($SkipUpdates)      { $_cmdParts += "-SkipUpdates" }
 if ($SkipLanguagePacks){ $_cmdParts += "-SkipLanguagePacks" }
 if ($SkipAppxRemoval)  { $_cmdParts += "-SkipAppxRemoval" }
 if ($SkipInboxAppLanguageFix) { $_cmdParts += "-SkipInboxAppLanguageFix" }
+if ($SkipDefenderUpdate) { $_cmdParts += "-SkipDefenderUpdate" }
 if ($ARM64)            { $_cmdParts += "-ARM64" } elseif ($X64) { $_cmdParts += "-X64" }
 if ($Unattended)       { $_cmdParts += "-Unattended" }
 if ($DebugBuild)       { $_cmdParts += "-DebugBuild" }
 Write-Log ($_cmdParts -join " ")
 Write-Log "Source: $SourceFolder  WIM: $wimFile  Index: $WimIndex  Edition: $($chosenImage.ImageName)"
+
+#endregion
+
+#region ── Defender image update (KB4568292) ─────────────────────────────────
+# Offline Defender update for the install image, using Microsoft's
+# defender-update-kit-<arch>.zip (KB4568292). Microsoft refreshes the zip in
+# place behind a stable fwlink, so it is downloaded fresh on every build.
+#
+# Microsoft's own DefenderUpdateWinImage.ps1 cannot be called here: it mounts
+# the image itself (Mount-WindowsImage -ImagePath/-Index) and commits on exit,
+# which collides with WimWizard's single mount session on $workWim. Its
+# AddUpdate action is plain file copying, not a DISM/CBS package operation:
+#   1. expand defender-dism-<arch>.cab
+#   2. copy cab\Definition Updates\Updates\* -> ProgramData\Microsoft\Windows Defender\Definition Updates\Updates
+#   3. copy cab\Platform\*                   -> ProgramData\Microsoft\Windows Defender\Platform
+#   4. copy cab\package-defender.xml         -> Windows\Temp (marker read by its Show/RemoveUpdate)
+# That logic is reimplemented below inside the existing mount. If the marker
+# is already present (patch mode on a WIM that got the kit last month), the
+# same folders Microsoft's RemoveUpdate clears are emptied first. Both folders
+# were verified empty in a stock 26H2 install.wim and in a WimWizard-built
+# (LCU-serviced) 26H2 image, so clearing them only removes kit content.
+# Definition Updates\Default/Backup/NisBackup are never touched (neither does
+# Microsoft's script).
+
+$DefenderKitUrls = @{
+    amd64 = 'https://go.microsoft.com/fwlink/?linkid=2144531'
+    # ARM64 link as published on the KB4568292 page - not tested by WimWizard.
+    arm64 = 'https://www.microsoft.com/security/encyclopedia/adlpackages.aspx?package=dismpackage&arch=arm'
+}
+
+# Drift detection: whitespace-insensitive SHA256 of the unsigned body of the
+# kit's DefenderUpdateWinImage.ps1 (everything before "# SIG # Begin signature
+# block" - the script is re-signed on each kit release, so a whole-file hash
+# would change every month). A mismatch means Microsoft changed the script, and
+# the reimplementation above should be reviewed against it. Warning only.
+# Empty = no baseline; the computed hash is then logged so it can be pasted here.
+$DefenderKitScriptKnownHash = '5684930AE11529387E78A0BA0A61BA2971E45CAAED941694A3197331A664F491'   # kit package 1.459.91.0, 2026-10-05
+
+function Get-DefenderKitScriptHash {
+    param([string]$Path)
+    $text = [System.IO.File]::ReadAllText($Path)
+    $idx  = $text.IndexOf('# SIG # Begin signature block')
+    if ($idx -ge 0) { $text = $text.Substring(0, $idx) }
+    $norm = [regex]::Replace($text, '\s+', '')
+    $sha  = [System.Security.Cryptography.SHA256]::Create()
+    try   { $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($norm)) }
+    finally { $sha.Dispose() }
+    return ([System.BitConverter]::ToString($bytes) -replace '-', '')
+}
+
+function Get-ImageArchTag {
+    # Maps Get-WindowsImage .Architecture to the arch tag used in
+    # package-defender.xml. Values per Microsoft's DefenderUpdateWinImage.ps1
+    # (x64 = 9, arm64 = 12). Returns $null for anything else (x86 not supported
+    # by WimWizard).
+    param($ImageInfo)
+    $a = [string]$ImageInfo.Architecture
+    if ($a -eq '9'  -or $a -eq 'x64')   { return 'amd64' }
+    if ($a -eq '12' -or $a -eq 'arm64') { return 'arm64' }
+    return $null
+}
+
+function Initialize-DefenderKit {
+    # Downloads, verifies and expands the kit for the given image architecture.
+    # Returns a hashtable describing the expanded kit, or $null if no kit is
+    # available. Throws on validation failures (signature, layout, arch).
+    param(
+        [string]$ArchTag,     # amd64 | arm64
+        [string]$CacheDir,    # persistent zip cache (NOT the Updates folder -
+                              # every .cab there is applied with Add-WindowsPackage)
+        [string]$ExtractDir   # per-build scratch, under $workRoot
+    )
+
+    if (-not $DefenderKitUrls.ContainsKey($ArchTag)) {
+        throw "No Defender kit URL for image architecture '$ArchTag'"
+    }
+    if (-not (Test-Path -LiteralPath $CacheDir)) { New-Item $CacheDir -ItemType Directory -Force | Out-Null }
+
+    $zipPath = Join-Path $CacheDir "defender-update-kit-$ArchTag.zip"
+    $tmpPath = "$zipPath.download"
+    $fresh   = $false
+
+    if ($internetOK) {
+        Write-Info "Downloading Defender update kit ($ArchTag, ~150-250 MB)..."
+        $oldPP = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'   # IWR progress bar slows large downloads in PS 5.1
+        try {
+            Invoke-WebRequest -Uri $DefenderKitUrls[$ArchTag] -OutFile $tmpPath -UseBasicParsing -ErrorAction Stop
+            # Guard against an HTML error page replacing a good cached zip: require the ZIP magic "PK"
+            $fs = [System.IO.File]::OpenRead($tmpPath)
+            try { $b0 = $fs.ReadByte(); $b1 = $fs.ReadByte() } finally { $fs.Dispose() }
+            if ($b0 -ne 0x50 -or $b1 -ne 0x4B) { throw "downloaded file is not a ZIP archive" }
+            Move-Item -LiteralPath $tmpPath -Destination $zipPath -Force
+            $fresh = $true
+            $mb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 0)
+            Write-OK "Defender kit downloaded ($mb MB)"
+            Write-Log "Defender kit downloaded: $zipPath ($mb MB)"
+        } catch {
+            Write-Warn "Defender kit download failed: $($_.Exception.Message)"
+            Write-Log "WARN: Defender kit download failed: $($_.Exception.Message)" "WARN"
+            Remove-Item -LiteralPath $tmpPath -Force -ErrorAction SilentlyContinue
+        } finally {
+            $ProgressPreference = $oldPP
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $zipPath)) {
+        Write-Warn "No Defender kit available (no download, no cached copy) - skipping Defender update"
+        Write-Log "WARN: No Defender kit available - skipped" "WARN"
+        return $null
+    }
+    if (-not $fresh) {
+        $age = (Get-Item -LiteralPath $zipPath).LastWriteTime.ToString('yyyy-MM-dd')
+        Write-Warn "Using cached Defender kit from $age (may not be the latest)"
+        Write-Log "WARN: Using cached Defender kit from $age" "WARN"
+    }
+
+    # Expand zip
+    if (Test-Path -LiteralPath $ExtractDir) { Remove-Item -LiteralPath $ExtractDir -Recurse -Force }
+    $zipOut = Join-Path $ExtractDir 'zip'
+    $cabOut = Join-Path $ExtractDir 'cab'
+    New-Item $zipOut -ItemType Directory -Force | Out-Null
+    New-Item $cabOut -ItemType Directory -Force | Out-Null
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $zipOut -Force
+
+    $cab = Get-ChildItem -LiteralPath $zipOut -Recurse -File -Filter 'defender-dism-*.cab' | Select-Object -First 1
+    if (-not $cab) { throw "defender-dism-*.cab not found in kit" }
+
+    # Signature: Microsoft's script only checks Status -eq Valid; also require a Microsoft signer.
+    $sig = Get-AuthenticodeSignature -LiteralPath $cab.FullName
+    if ($sig.Status -ne 'Valid') {
+        throw "Defender cab signature is not valid ($($sig.Status): $($sig.StatusMessage))"
+    }
+    if ($null -eq $sig.SignerCertificate -or $sig.SignerCertificate.Subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)') {
+        throw "Defender cab is not signed by Microsoft Corporation (signer: $($sig.SignerCertificate.Subject))"
+    }
+    Write-OK "Cab signature valid ($($cab.Name), Microsoft Corporation)"
+
+    # Drift check against Microsoft's tool
+    $kitPs1 = Get-ChildItem -LiteralPath $zipOut -Recurse -File -Filter 'DefenderUpdateWinImage.ps1' | Select-Object -First 1
+    if ($kitPs1) {
+        $h = Get-DefenderKitScriptHash -Path $kitPs1.FullName
+        if ([string]::IsNullOrEmpty($DefenderKitScriptKnownHash)) {
+            Write-Info "DefenderUpdateWinImage.ps1 hash (no baseline set): $h"
+            Write-Log "Defender kit script hash (no baseline): $h"
+        } elseif ($h -ne $DefenderKitScriptKnownHash) {
+            Write-Warn "DefenderUpdateWinImage.ps1 has changed since WimWizard's implementation was written."
+            Write-Warn "Review its AddUpdate logic against WimWizard. New hash: $h"
+            Write-Log "WARN: Defender kit script changed. Expected $DefenderKitScriptKnownHash, got $h" "WARN"
+        } else {
+            Write-OK "DefenderUpdateWinImage.ps1 unchanged (hash matches baseline)"
+        }
+    } else {
+        Write-Warn "DefenderUpdateWinImage.ps1 not found in kit - cannot check for logic changes"
+        Write-Log "WARN: DefenderUpdateWinImage.ps1 missing from kit" "WARN"
+    }
+
+    # Expand cab (same as Microsoft: expand <cab> -F:* <dir>)
+    $expOut = & expand.exe $cab.FullName '-F:*' $cabOut 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "expand.exe failed (exit $LASTEXITCODE): $(($expOut | Out-String).Trim())"
+    }
+
+    # Layout check
+    $xmlPath = Join-Path $cabOut 'package-defender.xml'
+    $defSrc  = Join-Path $cabOut 'Definition Updates\Updates'
+    $platSrc = Join-Path $cabOut 'Platform'
+    foreach ($p in @($xmlPath, $defSrc, $platSrc)) {
+        if (-not (Test-Path -LiteralPath $p)) { throw "Unexpected kit layout - missing: $($p.Substring($cabOut.Length + 1))" }
+    }
+    if (@(Get-ChildItem -LiteralPath $defSrc -Force).Count -eq 0) { throw "Unexpected kit layout - 'Definition Updates\Updates' is empty" }
+    if (@(Get-ChildItem -LiteralPath $platSrc -Force).Count -eq 0) { throw "Unexpected kit layout - 'Platform' is empty" }
+
+    # Package details (same fields Microsoft's Get-PackageDetailsFromXml reads)
+    try {
+        [xml]$x = Get-Content -LiteralPath $xmlPath -Raw
+        $pkg = @{
+            Arch             = [string]$x.packageinfo.arch
+            PackageVersion   = [string]$x.packageinfo.versions.defender
+            PlatformVersion  = [string]$x.packageinfo.versions.platform
+            EngineVersion    = [string]$x.packageinfo.versions.engine
+            SignatureVersion = [string]$x.packageinfo.versions.signatures
+        }
+    } catch {
+        throw "package-defender.xml is missing expected fields: $($_.Exception.Message)"
+    }
+
+    # Architecture (same comparison as Microsoft's ValidateCompatibility)
+    if ($pkg.Arch -notmatch $ArchTag) {
+        throw "Defender kit architecture '$($pkg.Arch)' does not match image architecture '$ArchTag'"
+    }
+
+    Write-OK ("Defender package {0} (platform {1}, engine {2}, security intelligence {3})" -f `
+        $pkg.PackageVersion, $pkg.PlatformVersion, $pkg.EngineVersion, $pkg.SignatureVersion)
+    Write-Log ("Defender kit ready: package {0}, platform {1}, engine {2}, SI {3}" -f `
+        $pkg.PackageVersion, $pkg.PlatformVersion, $pkg.EngineVersion, $pkg.SignatureVersion)
+
+    $pkg.XmlPath = $xmlPath
+    $pkg.DefSrc  = $defSrc
+    $pkg.PlatSrc = $platSrc
+    return $pkg
+}
+
+function Clear-DefenderKitFromImage {
+    # Equivalent of Microsoft's RemoveUpdate file operations.
+    param([string]$MountPath)
+    $base   = Join-Path $MountPath 'ProgramData\Microsoft\Windows Defender'
+    $marker = Join-Path $MountPath 'Windows\Temp\package-defender.xml'
+    foreach ($sub in @('Definition Updates\Updates', 'Platform')) {
+        $t = Join-Path $base $sub
+        if (Test-Path -LiteralPath $t) {
+            Get-ChildItem -LiteralPath $t -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+        }
+    }
+    if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force -ErrorAction Stop }
+}
+
+function Install-DefenderKitToImage {
+    # Applies an expanded kit to the mounted image. Returns $true on success,
+    # $false on a failure that was rolled back to the stock state (empty
+    # Updates/Platform folders, no marker). Throws only if the rollback itself
+    # fails, since a half-copied Platform folder must not be saved into the WIM.
+    param([hashtable]$Kit, [string]$MountPath)
+
+    $base       = Join-Path $MountPath 'ProgramData\Microsoft\Windows Defender'
+    $defTarget  = Join-Path $base 'Definition Updates\Updates'
+    $platTarget = Join-Path $base 'Platform'
+    $tempTarget = Join-Path $MountPath 'Windows\Temp'
+    $marker     = Join-Path $tempTarget 'package-defender.xml'
+
+    try {
+        if (Test-Path -LiteralPath $marker) {
+            $oldVer = 'unknown'
+            try { [xml]$ox = Get-Content -LiteralPath $marker -Raw; $oldVer = [string]$ox.packageinfo.versions.defender } catch {}
+            Write-Info "Image already contains Defender package $oldVer - replacing"
+            Write-Log "Defender: existing package $oldVer found in image - clearing before add"
+            Clear-DefenderKitFromImage -MountPath $MountPath
+        }
+
+        foreach ($d in @($defTarget, $platTarget, $tempTarget)) {
+            if (-not (Test-Path -LiteralPath $d)) { New-Item $d -ItemType Directory -Force | Out-Null }
+        }
+
+        Write-Info "Copying security intelligence and engine..."
+        Copy-Item -Path (Join-Path $Kit.DefSrc '*') -Destination $defTarget -Recurse -Force -ErrorAction Stop
+        Write-Info "Copying platform..."
+        Copy-Item -Path (Join-Path $Kit.PlatSrc '*') -Destination $platTarget -Recurse -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $Kit.XmlPath -Destination $tempTarget -Force -ErrorAction Stop
+
+        Write-OK "Defender updated in image (package $($Kit.PackageVersion))"
+        Write-Log "Defender update applied: package $($Kit.PackageVersion)"
+        return $true
+    } catch {
+        Write-Warn "Defender update failed: $($_.Exception.Message)"
+        Write-Log "WARN: Defender update failed: $($_.Exception.Message) - rolling back" "WARN"
+        try {
+            Clear-DefenderKitFromImage -MountPath $MountPath
+            Write-Warn "Defender changes rolled back - image keeps its inbox Defender"
+            Write-Log "Defender rollback OK" "WARN"
+        } catch {
+            throw "Defender update failed and rollback also failed ($($_.Exception.Message)) - image state is inconsistent, aborting build"
+        }
+        return $false
+    }
+}
 
 #endregion
 
@@ -2670,6 +3019,33 @@ try {
         Write-OK "WIM copied"
     }
     Write-Log "WIM copied: $workWim (index $workWimIndex)"
+
+    # Defender update kit - prepared before mount so download/validation
+    # failures never leave the image half-serviced. Architecture is read from
+    # the copied WIM itself rather than -X64/-ARM64, since patch mode does not
+    # derive those switches from the existing WIM. Non-fatal throughout.
+    $script:DefenderKit    = $null
+    $script:DefenderStatus = "Skipped (-SkipDefenderUpdate)"
+    if (-not $SkipDefenderUpdate) {
+        Write-Section "Defender update kit (KB4568292)"
+        try {
+            $defImgInfo = Get-WindowsImage -ImagePath $workWim -Index $workWimIndex -ErrorAction Stop
+            $defArch    = Get-ImageArchTag -ImageInfo $defImgInfo
+            if (-not $defArch) {
+                throw "unsupported image architecture '$($defImgInfo.Architecture)'"
+            }
+            $script:DefenderKit = Initialize-DefenderKit -ArchTag $defArch `
+                -CacheDir   (Join-Path $ScriptRoot "DefenderKit") `
+                -ExtractDir (Join-Path $workRoot  "DefenderKit")
+            $script:DefenderStatus = if ($script:DefenderKit) { "Pending" } else { "Not applied - no kit available" }
+        } catch {
+            Write-Warn "Defender kit preparation failed: $($_.Exception.Message)"
+            Write-Warn "Continuing without Defender update."
+            Write-Log "WARN: Defender kit preparation failed: $($_.Exception.Message)" "WARN"
+            $script:DefenderKit    = $null
+            $script:DefenderStatus = "Not applied - kit preparation failed (see log)"
+        }
+    }
 
     # Mount
     Write-Section "Mounting WIM"
@@ -3379,6 +3755,20 @@ try {
         }
     }
 
+    # ── Defender offline update ───────────────────────────────────────────────
+    # Plain file copies under ProgramData and Windows\Temp - not the component
+    # store - so position relative to LCU/LP/ResetBase does not matter
+    # (KB4568292 also states no ordering is required vs the LCU). Placed last
+    # so nothing after it can disturb the copied files before the save.
+    if ($script:DefenderKit) {
+        Write-Section "Defender update (offline)"
+        if (Install-DefenderKitToImage -Kit $script:DefenderKit -MountPath $mountDir) {
+            $script:DefenderStatus = "OK - package $($script:DefenderKit.PackageVersion) (SI $($script:DefenderKit.SignatureVersion))"
+        } else {
+            $script:DefenderStatus = "Not applied - failed and rolled back (see log)"
+        }
+    }
+
     # Dismount and save
     Write-Section "Saving and dismounting WIM"
     Write-Info "Writing changes back to WIM file..."
@@ -3402,6 +3792,42 @@ try {
     $sizeMB = [math]::Round((Get-Item $OutputPath).Length / 1MB, 0)
     Write-OK "Export complete: $OutputPath ($sizeMB MB)"
     Write-Log "Export OK: $OutputPath ($sizeMB MB)"
+
+    # Patch mode: correct the build number in an auto-generated filename from the
+    # serviced image itself (same Version property the normal build path uses for
+    # its filename). Non-fatal: on any problem the file keeps its name.
+    if ($script:PatchAutoNamed) {
+        try {
+            $_svcVer   = (Get-WindowsImage -ImagePath $OutputPath -Index 1 -ErrorAction Stop).Version
+            $_svcBuild = $_svcVer -replace '^\d+\.\d+\.', ''
+            $_curName  = [System.IO.Path]::GetFileName($OutputPath)
+            $_buildRx  = [regex]'_\d{5}\.\d+_'
+            if ($_svcBuild -notmatch '^\d{5}\.\d+$') {
+                Write-Log "Patch output name kept: image version '$_svcVer' has no build.UBR to use" "WARN"
+            } elseif (-not $_buildRx.IsMatch($_curName)) {
+                Write-Log "Patch output name kept: no build number found in '$_curName'"
+            } else {
+                $_newName = $_buildRx.Replace($_curName, "_${_svcBuild}_", 1)
+                if ($_newName -ne $_curName) {
+                    $_newPath = Join-Path (Split-Path $OutputPath -Parent) $_newName
+                    if (Test-Path -LiteralPath $_newPath) {
+                        Write-Warn "Not renamed - target already exists: $_newPath"
+                        Write-Log "Patch output name kept: target already exists: $_newPath" "WARN"
+                    } else {
+                        Rename-Item -LiteralPath $OutputPath -NewName $_newName -ErrorAction Stop
+                        Write-OK "Renamed to serviced build: $_newName"
+                        Write-Log "Patch output renamed to serviced build ${_svcBuild}: $_curName -> $_newName"
+                        $OutputPath = $_newPath
+                    }
+                } else {
+                    Write-Log "Patch output name already matches serviced build $_svcBuild"
+                }
+            }
+        } catch {
+            Write-Warn "Could not correct build number in filename: $($_.Exception.Message)"
+            Write-Log "Patch output name kept: $($_.Exception.Message)" "WARN"
+        }
+    }
 
     # Clean up
     Remove-Item $workRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -3436,6 +3862,10 @@ try {
                 [int]$Retries = 3,
                 [int]$DelaySeconds = 3
             )
+            # Called from inside the CM site PSDrive. An unqualified UNC path is
+            # resolved against the current location's provider (CMSite), where
+            # Test-Path/Get-Item always fail - so the path is provider-qualified.
+            if ($Path -notmatch '::') { $Path = "Microsoft.PowerShell.Core\FileSystem::$Path" }
             for ($i = 1; $i -le $Retries; $i++) {
                 if (-not (Test-Path -LiteralPath $Path)) { Start-Sleep -Seconds $DelaySeconds; continue }
                 try {
@@ -3600,6 +4030,8 @@ try {
     Write-Host ""
     Write-Host "  WIM file   : $OutputPath  ($sizeMB MB)" -ForegroundColor White
     Write-Host "  Log file   : $logFile" -ForegroundColor White
+    $defColor = if ($script:DefenderStatus -like "OK*") { "Green" } elseif ($script:DefenderStatus -like "Skipped*") { "DarkGray" } else { "Yellow" }
+    Write-Host "  Defender   : $($script:DefenderStatus)" -ForegroundColor $defColor
     Write-Host ""
     if ($script:SCCMImportSkipped) {
         Write-Host "  SCCM import : Skipped (use -SCCMImport to automate)" -ForegroundColor DarkGray
@@ -3617,6 +4049,7 @@ try {
         Write-Host "  SCCM import : OK - $SCCMPackageName$dpNote" -ForegroundColor Green
     }
     Write-Host ""
+    Write-Log "Defender: $($script:DefenderStatus)"
     Write-Log "=== DONE. $OutputPath ($sizeMB MB) ==="
 
 } catch {

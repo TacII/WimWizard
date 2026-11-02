@@ -14,11 +14,108 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.13.0
+  Version : 2.15.0
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.15.0 Fix: Patch WIM, SCCM source, "Create new package" overwrote the
+         original package's WIM. The post-build copy back to the package's
+         source path ran unconditionally, before the CreateNew branch, so the
+         patched image was written over the current WIM (keeping its old
+         name) and a second copy went to the new package. The original
+         package was not refreshed on the DPs, so production kept the old
+         content until the next DP update would have pushed the patched
+         image under the old package. Observed 2026-11-02 on PS10167E.
+         Change: both actions now write the patched WIM next to the
+         package's current WIM under its own name and never write to the
+         current WIM. "Replace existing package" is renamed "Update existing
+         package" and points the same package at the new file (old WIM kept
+         as a copy, explained by an (i) tooltip) instead of overwriting the
+         file in place. If the destination equals the current WIM or already
+         exists, Run stops before building (checked again after the build,
+         copy uses overwrite:false).
+         Fix: "Create new package" put the WIM in the SCCM tab's Package path
+         plus a subfolder named after the package. The SCCM tab path is no
+         longer used in patch mode; the destination is always the folder of
+         the package's current WIM (same for both actions).
+         Fix: Test-SCCMSourceStable never worked (same fix as WimWizard.ps1
+         5.7.2). Add-SCCMPackageToDPGroup calls it after Push-Location to the
+         CM site drive, where an unqualified UNC path is resolved by the
+         CMSite provider and Test-Path/Get-Item always fail, so every run
+         with a DP group reported "Source WIM did not appear stable" after
+         ~9 s. Path is now provider-qualified inside the function. The
+         distribution itself was unaffected (the warning is set before
+         Start-CMContentDistribution, which still ran).
+         Fix: Output path, its {Date} and the package name controls were
+         enabled with the SCCM source selected. Enabled states were only set
+         in the source radios' CheckedChanged handlers; the SCCM radio
+         starts checked, so its handler never ran until the radios were
+         toggled, and the patch-mode toggle did not touch these controls.
+         All states are now set by Update-PatchWimControlState, called from
+         the three handlers and once at creation. Disabled {Date} buttons are
+         greyed explicitly (a disabled flat button keeps its custom
+         BackColor and looked clickable).
+         Fix: a Package ID restored from the registry was never resolved:
+         the lookup ran only on TextChanged while patch mode was on, and the
+         ID is restored while patch mode is off. The command preview showed
+         "<WIM from pkg ...>" until the ID was retyped. The lookup is now a
+         function (Invoke-PatchWimPkgLookup) also called with -KeepName when
+         patch mode is switched on or the SCCM source selected; -KeepName
+         keeps the saved package name template instead of replacing it with
+         the package's current name.
+         Change: Patch WIM layout. Output path moved into the Local WIM
+         column of the source section. The lower section holds only SCCM
+         package settings (name left, action right). New read-only
+         Destination section shows the final WIM path for either source,
+         with a note on what happens to the package and the current WIM, in
+         red when Run would stop.
+         Change: completion text says "created" or "updated" and shows the
+         package ID and the destination path (it said "Package updated" in
+         both modes). Command preview shows the real engine output folder
+         instead of ".\Output\".
+         New: the GUI-side SCCM steps (copy, package create/update, DP
+         update, DP group) are appended to the engine's log for the run
+         (newest WIMServicing_*.log in Output\), prefixed "GUI:". They were
+         not logged anywhere before.
+         Destination line: the existence check is cached per path, so a
+         file removed after the line turned red stayed red. Rechecked now
+         by a Recheck button, when the window is reactivated (returning from
+         Explorer) and when the Patch WIM tab is opened. Run always checks
+         fresh regardless of the line.
+         Layout fixes after first look: the "Output path" label was in front
+         of its textbox in the z-order and its auto-sized box painted over
+         the field's top edge; label is now transparent and the textbox is
+         brought to front. Vertical divider in the SCCM package section
+         removed.
+         Fix: "failed successfully". A patch run ended with exit code 0 but no
+         WIM and no engine log in Output\; the GUI showed "Image patch
+         complete!" with "SCCM update failed: Patched WIM not found"
+         underneath, and nothing was logged (the GUI log lines started after
+         that check). Root cause in the engine run not yet known. Changes:
+         the patch flow now requires a WIM written during this run (newer
+         than the launch time) before it counts as a success, otherwise it
+         shows "Patch failed - no WIM was produced". The SCCM step only uses
+         that WIM - before, it took the newest WIM in Output\ regardless of
+         age, so a stale WIM from an earlier run could have been copied to
+         the package. GUI log lines are written from the start, to the
+         engine log or, if none exists, the console transcript.
+         New: the elevated launcher (both build and patch) records a console
+         transcript to Output\WimWizard_Console_<date>_<time>.log, catches an
+         unhandled engine error, prints it and exits 1, and treats a $null
+         $LASTEXITCODE as 0. Shared helper Write-WimWizardLauncher replaces
+         the two inline launcher definitions. The failure screens show the
+         transcript path.
+         Known limit: an SCCM package WIM whose name has no _yyyyMMdd date
+         gets the same name after patching, so Run refuses it.
+  2.14.0 New: "Skip Defender update (-SkipDefenderUpdate)" checkbox on the
+         Options tab (Help tab updated), for WimWizard.ps1 5.7.0's offline Defender update
+         (KB4568292), which is on by default. Unlike Skip updates/Skip LPs/
+         Skip Appx, it stays enabled in patch mode, because the engine
+         applies the Defender update in patch mode too. Passed to the engine
+         in both normal-build and patch-mode argument lists and command
+         previews, persisted as SkipDefender (DWORD) under the existing
+         registry key, and included in the unsaved-changes fingerprint.
   2.13.0 Change: removed the "Output filename preview" strip from the bottom
          of the Languages tab. The auto-generated name is still visible live
          via the Options tab's Output WIM field (Update-UI already kept that
@@ -55,9 +152,7 @@
          offset - so their effective x is 8, not $LangPanel's own 4). The
          explanatory ToolTip was replaced with a static multi-line label
          under the checkbox's short description - this tab has the room for
-         it and static text doesn't require the user to think to hover. That
-         text also drops the "greyed out when Skip lang packs is checked"
-         sentence - the greyed-out state itself already makes that obvious.
+         it and static text doesn't require the user to think to hover.
          Help tab text for both tabs updated to match.
   2.12.3 Change: grew the default window from 780x620 to 780x670 (and the
          Options tab's usable height from 449 to 499px, in both the initial
@@ -1036,6 +1131,7 @@ function Save-Settings {
   }
   Set-ItemProperty $RegPath -Name "SkipAppx"     -Value ([int]$ChkSkipAppx.Checked)
   Set-ItemProperty $RegPath -Name "SkipInboxAppFix" -Value ([int](-not $ChkFixInboxAppLang.Checked))
+  Set-ItemProperty $RegPath -Name "SkipDefender" -Value ([int]$ChkSkipDefender.Checked)
   $selFoDs  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key }) -join ","
   Set-ItemProperty $RegPath -Name "FoDs"             -Value $selFoDs
   Save-DriverPersistence
@@ -1082,6 +1178,7 @@ function Load-Settings {
     if ($reg.PSObject.Properties["SkipLPs"])      { $ChkSkipLPs.Checked     = [bool]$reg.SkipLPs     }
     if ($reg.PSObject.Properties["SkipAppx"])     { $ChkSkipAppx.Checked    = [bool]$reg.SkipAppx    }
     if ($reg.PSObject.Properties["SkipInboxAppFix"]) { $ChkFixInboxAppLang.Checked = -not [bool]$reg.SkipInboxAppFix }
+    if ($reg.PSObject.Properties["SkipDefender"]) { $ChkSkipDefender.Checked = [bool]$reg.SkipDefender }
     if ($reg.PSObject.Properties["FoDs"]) {
       foreach ($cb in $FoDCheckboxes.Values) { $cb.Checked = $false }
       foreach ($key in $reg.FoDs.Split(",")) {
@@ -1559,7 +1656,7 @@ function Get-FilenamePreview {
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.13.0"
+$WimWizardVersion = "2.15.0"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -2519,6 +2616,15 @@ $TabOpts.Controls.Add($ChkSkipAppx)
 $TabOpts.Controls.Add((New-OptionLabel "Do not remove any provisioned Appx packages." $y))
 
 $y += 45
+# Applies in both full build and patch mode - deliberately NOT in the
+# patch-mode disable/reset loop alongside the three Skip* boxes above.
+$ChkSkipDefender = New-DarkCheckbox -Text "Skip Defender update  (-SkipDefenderUpdate)" -Checked $false
+$ChkSkipDefender.Location = New-Object System.Drawing.Point(8, $y)
+$ChkSkipDefender.Width  = 400
+$TabOpts.Controls.Add($ChkSkipDefender)
+$TabOpts.Controls.Add((New-OptionLabel "Do not apply Microsoft's offline Defender update kit (KB4568292) to the image." $y))
+
+$y += 45
 
 
 
@@ -2600,7 +2706,8 @@ $LblFixInboxAppLangInfo.Text =
   "Store-delivered apps like Notepad, Calculator and Paint get their UI language from a satellite package the " +
   "Store downloads separately - not from the language pack injected into the image. Left unfixed, these apps " +
   "stay in English even after a language pack is applied. When checked (default), WimWizard reinstalls the " +
-  "kept apps via winget at first user logon so the Store re-fetches the correct language satellite."
+  "kept apps via winget at first user logon so the Store re-fetches the correct language satellite. Greyed " +
+  "out when ""Skip lang packs"" is checked, since there's no language to fix in that case."
 $LblFixInboxAppLangInfo.ForeColor = $ColSubtext
 $LblFixInboxAppLangInfo.Font  = $FontSmall
 $LblFixInboxAppLangInfo.Location = New-Object System.Drawing.Point(30, 400)
@@ -3449,6 +3556,10 @@ function Test-SCCMSourceStable {
     [int]$Retries = 3,
     [int]$DelaySeconds = 3
   )
+  # Called from inside the CM site PSDrive. An unqualified UNC path is resolved
+  # against the current location's provider (CMSite), where Test-Path/Get-Item
+  # always fail - so the path is provider-qualified (see 2.15.0).
+  if ($Path -notmatch '::') { $Path = "Microsoft.PowerShell.Core\FileSystem::$Path" }
   for ($i = 1; $i -le $Retries; $i++) {
     if (-not (Test-Path -LiteralPath $Path)) { Start-Sleep -Seconds $DelaySeconds; continue }
     try {
@@ -3463,6 +3574,59 @@ function Test-SCCMSourceStable {
     if ($size2 -eq $size1) { return $true }
   }
   return $false
+}
+
+# Writes the elevated launcher script that runs WimWizard.ps1 and returns the
+# path of the console transcript it records. Before 2.15.0 the launcher was
+# just "& WimWizard.ps1 ...; exit $LASTEXITCODE": an unhandled error that ended
+# the engine before its own log existed left no trace (the console window
+# closed), and $LASTEXITCODE could still be 0, so the GUI reported success.
+# Now the whole console session is transcribed to Output\WimWizard_Console_*.log
+# (deliberately not WIMServicing_*.log, which is the engine's own log), an
+# unhandled error is caught, printed and turned into exit code 1.
+function Write-WimWizardLauncher {
+  param([string]$LauncherPath, [string]$EngineArgs)
+  $outDir = Join-Path $ScriptRoot "Output"
+  if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+  $transcript = Join-Path $outDir ("WimWizard_Console_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+  $template = @'
+try { Start-Transcript -Path '{TRANSCRIPT}' -Force | Out-Null } catch { }
+Set-Location '{ROOT}'
+$wwCode = 0
+try {
+  & '{ENGINE}' {ARGS}
+  $wwCode = $LASTEXITCODE
+} catch {
+  Write-Host ''
+  Write-Host ('  [LAUNCHER] WimWizard.ps1 stopped with an unhandled error: ' + $_.Exception.Message) -ForegroundColor Red
+  Write-Host ('  ' + $_.InvocationInfo.PositionMessage) -ForegroundColor Red
+  $wwCode = 1
+}
+if ($null -eq $wwCode) { $wwCode = 0 }
+Write-Host ('  [LAUNCHER] Exit code: ' + $wwCode)
+try { Stop-Transcript | Out-Null } catch { }
+exit $wwCode
+'@
+  $content = $template.Replace('{TRANSCRIPT}', ($transcript -replace "'", "''"))
+  $content = $content.Replace('{ROOT}',   ($ScriptRoot -replace "'", "''"))
+  $content = $content.Replace('{ENGINE}', ($MainScript -replace "'", "''"))
+  $content = $content.Replace('{ARGS}',   $EngineArgs)
+  Set-Content -Path $LauncherPath -Value $content -Encoding UTF8
+  return $transcript
+}
+
+# Appends a line to the engine's log for the current patch run (found after the
+# build as the newest WIMServicing_*.log in Output\). The GUI-side SCCM steps of
+# the Patch WIM flow were not logged anywhere before 2.15.0. Best-effort: a
+# logging failure never affects the SCCM steps.
+$Script:PatchPostLogFile = $null
+function Write-PatchPostLog {
+  param([string]$Msg, [string]$Level = "INFO")
+  if (-not $Script:PatchPostLogFile) { return }
+  try {
+    [System.IO.File]::AppendAllText($Script:PatchPostLogFile,
+      ("[{0}] [{1}] GUI: {2}`r`n" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Level, $Msg))
+  } catch { }
 }
 
 function Add-SCCMPackageToDPGroup {
@@ -4266,9 +4430,10 @@ $LblPWSrc.BackColor = [System.Drawing.Color]::FromArgb(35, 35, 35)
 $TabPatchWim.Controls.Add($LblPWSrc)
 $pwy += 26
 
-# Section: 10 top + 22 checkbox + 8 sep + 24 col-headers + 26 input row
-#        + 28 status label + 10 bottom = 128
-$PWSecSrc = New-PWSection $pwy 128
+# Section: 10 top + 28 checkbox + 8 sep + 27 col-headers + 26 input row
+#        + right column: 22 "Output path" label + 22 output row + 12 bottom = 155
+#        (left column: status label below Package ID)
+$PWSecSrc = New-PWSection $pwy 155
 $pp = 10
 
 # ---- Patch mode enable checkbox ----
@@ -4314,7 +4479,7 @@ $pp += 27
 # ---- Vertical divider between columns ----
 $PWVDiv = New-Object System.Windows.Forms.Panel
 $PWVDiv.Location  = New-Object System.Drawing.Point(355, ($pp - 4))
-$PWVDiv.Size      = New-Object System.Drawing.Size(1, 53)
+$PWVDiv.Size      = New-Object System.Drawing.Size(1, 82)
 $PWVDiv.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
 $PWSecSrc.Controls.Add($PWVDiv)
 
@@ -4381,34 +4546,116 @@ $LblPWPkgStatus.Size      = New-Object System.Drawing.Size(330, 18)
 $LblPWPkgStatus.Visible   = $false
 $PWSecSrc.Controls.Add($LblPWPkgStatus)
 
-$TxtPatchWimPkgID.Add_TextChanged({
-  if (-not $ChkPatchMode.Checked) { return }
+# ---- RIGHT column: Output path (local WIM source only) ----
+# Moved here from the lower section in 2.15.0 so it sits in the same column as
+# the local WIM it belongs to. The SCCM source never uses it: a patched SCCM
+# image always goes next to the package's current WIM (see Destination below).
+$LblPWWimNameLbl = New-Object System.Windows.Forms.Label
+$LblPWWimNameLbl.Text      = "Output path:"
+$LblPWWimNameLbl.Font      = $FontSmall
+$LblPWWimNameLbl.ForeColor = $ColSubtext
+$LblPWWimNameLbl.Location  = New-Object System.Drawing.Point(370, ($pp + 1))
+$LblPWWimNameLbl.AutoSize  = $true
+$LblPWWimNameLbl.BackColor = [System.Drawing.Color]::Transparent
+$PWSecSrc.Controls.Add($LblPWWimNameLbl)
+
+$TxtPatchWimOutName = New-Object System.Windows.Forms.TextBox
+$TxtPatchWimOutName.Location    = New-Object System.Drawing.Point(370, ($pp + 22))
+$TxtPatchWimOutName.Size        = New-Object System.Drawing.Size(168, 22)
+$TxtPatchWimOutName.BackColor   = [System.Drawing.Color]::FromArgb(62, 62, 62)
+$TxtPatchWimOutName.ForeColor   = $ColFg
+$TxtPatchWimOutName.BorderStyle = "FixedSingle"
+$TxtPatchWimOutName.Text        = ""
+$TxtPatchWimOutName.Enabled     = $false
+$PWSecSrc.Controls.Add($TxtPatchWimOutName)
+# The label is added first, which puts it in front in the z-order. Its
+# auto-sized box reached into the top of the textbox and painted over the
+# field's top edge (visible with display scaling). Textbox goes on top.
+$TxtPatchWimOutName.BringToFront()
+
+$BtnPWWimDate = New-Object System.Windows.Forms.Button
+$BtnPWWimDate.Text      = "{Date}"
+$BtnPWWimDate.Location  = New-Object System.Drawing.Point(544, ($pp + 22))
+$BtnPWWimDate.Size      = New-Object System.Drawing.Size(56, 22)
+$BtnPWWimDate.BackColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
+$BtnPWWimDate.ForeColor = $ColFg
+$BtnPWWimDate.FlatStyle = "Flat"
+$BtnPWWimDate.Font      = $FontSmall
+$BtnPWWimDate.Add_Click({
+  $box = $TxtPatchWimOutName
+  $pos = $box.SelectionStart
+  $box.Text = $box.Text.Insert($pos, "{Date}")
+  $box.SelectionStart = $pos + 6
+  $box.Focus()
+})
+$PWSecSrc.Controls.Add($BtnPWWimDate)
+
+$BtnPWBrowseOut = New-Object System.Windows.Forms.Button
+$BtnPWBrowseOut.Text      = "Browse..."
+$BtnPWBrowseOut.Location  = New-Object System.Drawing.Point(606, ($pp + 22))
+$BtnPWBrowseOut.Size      = New-Object System.Drawing.Size(86, 22)
+$BtnPWBrowseOut.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnPWBrowseOut.ForeColor = $ColFg
+$BtnPWBrowseOut.FlatStyle = "Flat"
+$BtnPWBrowseOut.Enabled   = $false
+$BtnPWBrowseOut.Add_Click({
+  $dlg = New-Object System.Windows.Forms.SaveFileDialog
+  $dlg.Title  = "Choose output WIM path"
+  $dlg.Filter = "WIM files (*.wim)|*.wim"
+  $dlg.InitialDirectory = Join-Path $ScriptRoot "Output"
+  $dlg.FileName = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+  if ($dlg.ShowDialog() -eq "OK") {
+    $TxtPatchWimOutName.Text = $dlg.FileName
+    $Script:PatchWimOutNameFromSource = $false
+  }
+})
+$PWSecSrc.Controls.Add($BtnPWBrowseOut)
+
+# Resolves the package in SCCM: status label, package name, and the full path of
+# the package's current WIM ($Script:PatchWimSCCMSourceWim, used for the command
+# preview and the Destination line). Called on Package ID edits, and with
+# -KeepName when patch mode is switched on or the SCCM source is selected, so an
+# ID restored from the registry (restored while patch mode is still off, when
+# the lookup is skipped) is resolved without overwriting the saved name template.
+function Invoke-PatchWimPkgLookup {
+  param([switch]$KeepName)
   $id = $TxtPatchWimPkgID.Text.Trim()
-  $Script:PatchWimSCCMFileName = ""   # clear on every keystroke
+  $Script:PatchWimSCCMFileName  = ""
+  $Script:PatchWimSCCMSourceWim = ""
+  if (-not $ChkPatchMode.Checked -or -not $RadPWSrcSCCM.Checked) { return }
   if ($id.Length -eq 8 -and $Script:SCCMModuleAvailable) {
+    $pushed = $false
     try {
       if (-not (Get-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -ErrorAction SilentlyContinue)) {
         Import-Module $Script:SCCMModulePath -ErrorAction Stop
         New-PSDrive -Name $TxtSCCMSiteCode.Text.Trim() -PSProvider CMSite -Root $TxtSCCMServer.Text.Trim() -ErrorAction Stop | Out-Null
       }
       Push-Location "$($TxtSCCMSiteCode.Text.Trim())`:\" -ErrorAction Stop
+      $pushed = $true
       $pkg = Get-CMOperatingSystemImage -Id $id -ErrorAction SilentlyContinue
       Pop-Location
+      $pushed = $false
       if ($pkg) {
         $LblPWPkgStatus.Text      = [char]0x2714 + "  Found: $($pkg.Name)"
         $LblPWPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
-        $Script:PatchWimWritingPkgName = $true
-        $TxtPatchWimPkgName.Text = $pkg.Name
-        $Script:PatchWimWritingPkgName = $false
+        if (-not $KeepName -or -not $TxtPatchWimPkgName.Text.Trim()) {
+          $Script:PatchWimWritingPkgName = $true
+          $TxtPatchWimPkgName.Text = $pkg.Name
+          $Script:PatchWimWritingPkgName = $false
+        }
 
-        # Resolve WIM filename from package source path for command preview
+        # Resolve the WIM from the package source path (file or folder)
         $srcPath = $pkg.PkgSourcePath
         if ($srcPath) {
           if ($srcPath -match '\.(wim|esd)$') {
-            $Script:PatchWimSCCMFileName = [System.IO.Path]::GetFileName($srcPath)
+            $Script:PatchWimSCCMFileName  = [System.IO.Path]::GetFileName($srcPath)
+            $Script:PatchWimSCCMSourceWim = $srcPath
           } else {
-            $wim = Get-ChildItem -Path $srcPath -Filter "*.wim" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($wim) { $Script:PatchWimSCCMFileName = $wim.Name }
+            $wim = Get-ChildItem -LiteralPath $srcPath -Filter "*.wim" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($wim) {
+              $Script:PatchWimSCCMFileName  = $wim.Name
+              $Script:PatchWimSCCMSourceWim = $wim.FullName
+            }
           }
         }
       } else {
@@ -4416,74 +4663,87 @@ $TxtPatchWimPkgID.Add_TextChanged({
         $LblPWPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
       }
     } catch {
+      if ($pushed) { Pop-Location -ErrorAction SilentlyContinue }
       $LblPWPkgStatus.Text      = [char]0x2718 + "  Could not verify: $($_.Exception.Message)"
       $LblPWPkgStatus.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
     }
     $LblPWPkgStatus.Visible = $true
-    Update-UI   # refresh command preview with resolved WIM filename
   } elseif ($id.Length -lt 8) {
     $LblPWPkgStatus.Visible = $false
   }
+}
+
+$TxtPatchWimPkgID.Add_TextChanged({
+  if (-not $ChkPatchMode.Checked) { return }
+  Invoke-PatchWimPkgLookup
+  Update-UI   # refresh command preview and Destination line
 })
 
 # ---- Source radio logic ----
+# All enabled/disabled states of the Patch WIM tab are set in one place from the
+# three inputs that drive them (patch mode checkbox, SCCM radio, Local radio).
+# Before 2.15.0 each handler set its own subset, and the initial state was never
+# applied: the SCCM radio starts checked, so its CheckedChanged never fired until
+# the user toggled the radios, and the patch-mode toggle didn't touch the Output
+# path controls - leaving Output path and its {Date} button active with the SCCM
+# source selected.
+function Set-PWButtonEnabled {
+  param($Button, [bool]$Enabled, [System.Drawing.Color]$OnColor)
+  $Button.Enabled   = $Enabled
+  # A disabled flat button keeps its custom BackColor, so an accent-coloured
+  # button still looks clickable. Grey it explicitly.
+  $Button.BackColor = if ($Enabled) { $OnColor } else { [System.Drawing.Color]::FromArgb(60, 60, 60) }
+}
+
+function Update-PatchWimControlState {
+  $on    = $ChkPatchMode.Checked
+  $sccm  = $on -and $RadPWSrcSCCM.Checked
+  $local = $on -and $RadPWSrcLocal.Checked
+  $blue  = [System.Drawing.Color]::FromArgb(0, 100, 180)
+  $green = [System.Drawing.Color]::FromArgb(0, 200, 80)
+
+  $RadPWSrcSCCM.Enabled  = $on
+  $RadPWSrcLocal.Enabled = $on
+
+  # SCCM source: Package ID (upper left) and the SCCM package section
+  $TxtPatchWimPkgID.Enabled   = $sccm
+  $LblPWPkgStatus.Visible     = $sccm -and ($LblPWPkgStatus.Text -ne "")
+  $TxtPatchWimPkgName.Enabled = $sccm
+  Set-PWButtonEnabled $BtnPWDate $sccm $blue
+  $LblPWPkgPreview.ForeColor  = if ($sccm) { $green } else { $ColSubtext }
+  $RadPatchWimReplace.Enabled = $sccm
+  $RadPatchWimNew.Enabled     = $sccm
+
+  # Local source: WIM file + Output path (upper right)
+  $TxtPatchWim.Enabled        = $local
+  $TxtPatchWim.ForeColor      = if ($local) { $ColFg } else { $ColSubtext }
+  $BtnBrowsePatch.Enabled     = $local
+  $TxtPatchWimOutName.Enabled = $local
+  Set-PWButtonEnabled $BtnPWWimDate $local $blue
+  $BtnPWBrowseOut.Enabled     = $local
+
+  if ($BtnPWDestRecheck) { $BtnPWDestRecheck.Enabled = $on }
+}
+
 $RadPWSrcSCCM.Add_CheckedChanged({
-  if ($RadPWSrcSCCM.Checked -and $ChkPatchMode.Checked) {
-    # Enable SCCM column — restore status label visibility (colour preserved from last lookup)
-    $TxtPatchWimPkgID.Enabled      = $true
-    if ($LblPWPkgStatus.Text -ne "") { $LblPWPkgStatus.Visible = $true }
-    $TxtPatchWimPkgName.Enabled    = $true
-    $BtnPWDate.Enabled             = $true
-    $LblPWPkgPreview.ForeColor     = [System.Drawing.Color]::FromArgb(0, 200, 80)
-    $RadPatchWimReplace.Enabled    = $true
-    $RadPatchWimNew.Enabled        = $true
-    # Disable Local WIM column
-    $TxtPatchWim.Enabled           = $false
-    $TxtPatchWim.ForeColor         = $ColSubtext
-    $BtnBrowsePatch.Enabled        = $false
-    $TxtPatchWimOutName.Enabled    = $false
-    $BtnPWWimDate.Enabled          = $false
-    $BtnPWBrowseOut.Enabled        = $false
-    $LblPWWimPreview.ForeColor     = $ColSubtext
+  if ($RadPWSrcSCCM.Checked -and $ChkPatchMode.Checked -and -not $Script:PatchWimSCCMSourceWim) {
+    Invoke-PatchWimPkgLookup -KeepName
   }
+  Update-PatchWimControlState
+  Update-UI
 })
 $RadPWSrcLocal.Add_CheckedChanged({
-  if ($RadPWSrcLocal.Checked -and $ChkPatchMode.Checked) {
-    # Enable Local WIM column
-    $TxtPatchWim.Enabled           = $true
-    $TxtPatchWim.ForeColor         = $ColFg
-    $BtnBrowsePatch.Enabled        = $true
-    $TxtPatchWimOutName.Enabled    = $true
-    $BtnPWWimDate.Enabled          = $true
-    $BtnPWBrowseOut.Enabled        = $true
-    $LblPWWimPreview.ForeColor     = [System.Drawing.Color]::FromArgb(0, 200, 80)
-    # Disable SCCM column
-    $TxtPatchWimPkgID.Enabled      = $false
-    $LblPWPkgStatus.Visible        = $false
-    $TxtPatchWimPkgName.Enabled    = $false
-    $BtnPWDate.Enabled             = $false
-    $LblPWPkgPreview.ForeColor     = $ColSubtext
-    $RadPatchWimReplace.Enabled    = $false
-    $RadPatchWimNew.Enabled        = $false
-  }
+  Update-PatchWimControlState
+  Update-UI
 })
 
 # ---- Patch mode master toggle ----
 $ChkPatchMode.Add_CheckedChanged({
   $on = $ChkPatchMode.Checked
-  $RadPWSrcSCCM.Enabled  = $on
-  $RadPWSrcLocal.Enabled = $on
-  if ($on) {
-    $TxtPatchWimPkgID.Enabled = $RadPWSrcSCCM.Checked
-    $TxtPatchWim.Enabled      = $RadPWSrcLocal.Checked
-    $BtnBrowsePatch.Enabled   = $RadPWSrcLocal.Checked
-    $TxtPatchWim.ForeColor    = if ($RadPWSrcLocal.Checked) { $ColFg } else { $ColSubtext }
-  } else {
-    $TxtPatchWimPkgID.Enabled = $false
-    $TxtPatchWim.Enabled      = $false
-    $BtnBrowsePatch.Enabled   = $false
-    $TxtPatchWim.ForeColor    = $ColSubtext
-  }
+  # Resolve a Package ID restored from the registry (the lookup is skipped while
+  # patch mode is off), keeping the saved package name template.
+  if ($on -and $RadPWSrcSCCM.Checked) { Invoke-PatchWimPkgLookup -KeepName }
+  Update-PatchWimControlState
   $TabLang.Enabled = -not $on
   $TabApps.Enabled = -not $on
   $TabFoD.Enabled  = -not $on
@@ -4517,28 +4777,28 @@ $TxtPatchWim.Add_TextChanged({
   Update-UI
 })
 
-$pwy += 128 + 6
+$pwy += 155 + 6
 
 # ==============================================================================
-# PATCH WIM SECTION 2 - Details & Action (two-column, no section heading bar)
-# Left  (x=14..348):  Package Name (stacked), preview, separator, Action radios, hint
-# Right (x=366..704): Output WIM (stacked), preview
-# Row heights: 16 label + 22 input+btn + 6 gap + 18 preview = 62; sep+8; 24+24 radios; 8+16 hint
-# Total inner: 10 + 16 + 22 + 6 + 18 + 8sep + 8 + 24 + 24 + 8 + 16 + 10 = 170
+# PATCH WIM SECTION 2 - SCCM package (SCCM source only)
+# Left  (x=14..348):  Package Name label, textbox + {Date}, preview
+# Right (x=370..704): Action radios (no divider between the columns)
+# Inner: 10 + 21 label + 28 input + 20 preview + 9 bottom = 88
+# Before 2.15.0 this section also held the local-source Output path in its right
+# column, which read as if it applied to the SCCM source too (it never did).
 # ==============================================================================
-$Script:PatchWimWritingPkgName   = $false
+$Script:PatchWimWritingPkgName    = $false
 $Script:PatchWimOutNameFromSource = $false
-$Script:PatchWimSCCMFileName      = ""   # WIM filename fetched from pkg source path (for command preview)
+$Script:PatchWimSCCMFileName      = ""   # WIM filename from the package source path (command preview)
+$Script:PatchWimSCCMSourceWim     = ""   # full path of the package's current WIM (Destination line)
+$Script:PatchWimDestCheckedPath   = ""   # Destination existence check cache (avoids a network
+$Script:PatchWimDestExists        = $false   # round-trip on every Update-UI call)
 
-$PWSecDetails = New-PWSection $pwy 231
+$PWSecDetails = New-PWSection $pwy 88
 $pp = 10
 
-# ---- Vertical divider (full inner height) ----
-$PWVDiv2 = New-Object System.Windows.Forms.Panel
-$PWVDiv2.Location  = New-Object System.Drawing.Point(355, 6)
-$PWVDiv2.Size      = New-Object System.Drawing.Size(1, 199)
-$PWVDiv2.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$PWSecDetails.Controls.Add($PWVDiv2)
+# No vertical divider in this section (removed in 2.15.0 - it sat right next
+# to the {Date} button and added nothing between name and action).
 
 # ---- LEFT row 1: Package Name label ----
 $LblPWPkgNameLbl = New-Object System.Windows.Forms.Label
@@ -4548,15 +4808,6 @@ $LblPWPkgNameLbl.ForeColor = $ColSubtext
 $LblPWPkgNameLbl.Location  = New-Object System.Drawing.Point(14, $pp)
 $LblPWPkgNameLbl.AutoSize  = $true
 $PWSecDetails.Controls.Add($LblPWPkgNameLbl)
-
-# ---- RIGHT row 1: Output path label ----
-$LblPWWimNameLbl = New-Object System.Windows.Forms.Label
-$LblPWWimNameLbl.Text      = "Output path:"
-$LblPWWimNameLbl.Font      = $FontSmall
-$LblPWWimNameLbl.ForeColor = $ColSubtext
-$LblPWWimNameLbl.Location  = New-Object System.Drawing.Point(366, $pp)
-$LblPWWimNameLbl.AutoSize  = $true
-$PWSecDetails.Controls.Add($LblPWWimNameLbl)
 
 $pp += 21
 
@@ -4568,6 +4819,7 @@ $TxtPatchWimPkgName.BackColor   = [System.Drawing.Color]::FromArgb(62, 62, 62)
 $TxtPatchWimPkgName.ForeColor   = $ColFg
 $TxtPatchWimPkgName.BorderStyle = "FixedSingle"
 $TxtPatchWimPkgName.Text        = ""
+$TxtPatchWimPkgName.Enabled     = $false
 $PWSecDetails.Controls.Add($TxtPatchWimPkgName)
 
 $BtnPWDate = New-Object System.Windows.Forms.Button
@@ -4587,56 +4839,46 @@ $BtnPWDate.Add_Click({
 })
 $PWSecDetails.Controls.Add($BtnPWDate)
 
-# ---- RIGHT row 2: Output path textbox (full right-column width) ----
-$TxtPatchWimOutName = New-Object System.Windows.Forms.TextBox
-$TxtPatchWimOutName.Location    = New-Object System.Drawing.Point(366, $pp)
-$TxtPatchWimOutName.Size        = New-Object System.Drawing.Size(332, 22)
-$TxtPatchWimOutName.BackColor   = [System.Drawing.Color]::FromArgb(62, 62, 62)
-$TxtPatchWimOutName.ForeColor   = $ColFg
-$TxtPatchWimOutName.BorderStyle = "FixedSingle"
-$TxtPatchWimOutName.Text        = ""
-$PWSecDetails.Controls.Add($TxtPatchWimOutName)
+# ---- RIGHT: Action radios (aligned with the Package Name textbox row) ----
+$RadPatchWimReplace = New-Object System.Windows.Forms.RadioButton
+$RadPatchWimReplace.Text      = "Update existing package"
+$RadPatchWimReplace.Checked   = $true
+$RadPatchWimReplace.ForeColor = $ColFg
+$RadPatchWimReplace.BackColor = [System.Drawing.Color]::Transparent
+$RadPatchWimReplace.Font      = $FontMain
+$RadPatchWimReplace.AutoSize  = $true
+$RadPatchWimReplace.Location  = New-Object System.Drawing.Point(370, ($pp - 2))
+$PWSecDetails.Controls.Add($RadPatchWimReplace)
 
-$pp += 26
+# (i) next to "Update existing package" - hover explains what happens to the old WIM
+$LblPWUpdateInfo = New-Object System.Windows.Forms.Label
+$LblPWUpdateInfo.Text      = [char]0x24D8   # circled latin small letter i
+$LblPWUpdateInfo.Font      = New-Object System.Drawing.Font('Segoe UI Symbol', 10)
+$LblPWUpdateInfo.ForeColor = $ColAccent
+$LblPWUpdateInfo.BackColor = [System.Drawing.Color]::Transparent
+$LblPWUpdateInfo.AutoSize  = $true
+$LblPWUpdateInfo.Cursor    = [System.Windows.Forms.Cursors]::Help
+$LblPWUpdateInfo.Location  = New-Object System.Drawing.Point(
+  ($RadPatchWimReplace.Left + $RadPatchWimReplace.PreferredSize.Width + 2), ($pp - 3))
+$PWSecDetails.Controls.Add($LblPWUpdateInfo)
+$Script:PWUpdateInfoTip = New-Object System.Windows.Forms.ToolTip
+$Script:PWUpdateInfoTip.AutoPopDelay = 20000
+$Script:PWUpdateInfoTip.SetToolTip($LblPWUpdateInfo,
+  "The patched WIM is saved as a new file next to the package's current WIM,`r`n" +
+  "and the existing package (same Package ID) is pointed at the new file,`r`n" +
+  "so task sequence references keep working.`r`n`r`n" +
+  "The old WIM is kept as a copy in the same folder and is never overwritten.`r`n" +
+  "Delete it yourself once the updated package is verified.")
 
-# ---- RIGHT row 3: {Date} + Browse buttons ----
-$BtnPWWimDate = New-Object System.Windows.Forms.Button
-$BtnPWWimDate.Text      = "{Date}"
-$BtnPWWimDate.Location  = New-Object System.Drawing.Point(366, $pp)
-$BtnPWWimDate.Size      = New-Object System.Drawing.Size(56, 22)
-$BtnPWWimDate.BackColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
-$BtnPWWimDate.ForeColor = $ColFg
-$BtnPWWimDate.FlatStyle = "Flat"
-$BtnPWWimDate.Font      = $FontSmall
-$BtnPWWimDate.Add_Click({
-  $box = $TxtPatchWimOutName
-  $pos = $box.SelectionStart
-  $box.Text = $box.Text.Insert($pos, "{Date}")
-  $box.SelectionStart = $pos + 6
-  $box.Focus()
-})
-$PWSecDetails.Controls.Add($BtnPWWimDate)
-
-$BtnPWBrowseOut = New-Object System.Windows.Forms.Button
-$BtnPWBrowseOut.Text      = "Browse..."
-$BtnPWBrowseOut.Location  = New-Object System.Drawing.Point(428, $pp)
-$BtnPWBrowseOut.Size      = New-Object System.Drawing.Size(86, 22)
-$BtnPWBrowseOut.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-$BtnPWBrowseOut.ForeColor = $ColFg
-$BtnPWBrowseOut.FlatStyle = "Flat"
-$BtnPWBrowseOut.Enabled   = $false
-$BtnPWBrowseOut.Add_Click({
-  $dlg = New-Object System.Windows.Forms.SaveFileDialog
-  $dlg.Title  = "Choose output WIM path"
-  $dlg.Filter = "WIM files (*.wim)|*.wim"
-  $dlg.InitialDirectory = Join-Path $ScriptRoot "Output"
-  $dlg.FileName = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
-  if ($dlg.ShowDialog() -eq "OK") {
-    $TxtPatchWimOutName.Text = $dlg.FileName
-    $Script:PatchWimOutNameFromSource = $false
-  }
-})
-$PWSecDetails.Controls.Add($BtnPWBrowseOut)
+$RadPatchWimNew = New-Object System.Windows.Forms.RadioButton
+$RadPatchWimNew.Text      = "Create new package"
+$RadPatchWimNew.Checked   = $false
+$RadPatchWimNew.ForeColor = $ColFg
+$RadPatchWimNew.BackColor = [System.Drawing.Color]::Transparent
+$RadPatchWimNew.Font      = $FontMain
+$RadPatchWimNew.AutoSize  = $true
+$RadPatchWimNew.Location  = New-Object System.Drawing.Point(370, ($pp + 22))
+$PWSecDetails.Controls.Add($RadPatchWimNew)
 
 $pp += 28
 
@@ -4652,66 +4894,76 @@ $PWSecDetails.Controls.Add($LblPWPkgPreviewCap)
 $LblPWPkgPreview = New-Object System.Windows.Forms.Label
 $LblPWPkgPreview.Text      = ""
 $LblPWPkgPreview.Font      = $FontSmall
-$LblPWPkgPreview.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
+$LblPWPkgPreview.ForeColor = $ColSubtext
 $LblPWPkgPreview.Location  = New-Object System.Drawing.Point(62, ($pp + 2))
 $LblPWPkgPreview.Size      = New-Object System.Drawing.Size(284, 16)
 $PWSecDetails.Controls.Add($LblPWPkgPreview)
 
-# ---- RIGHT row 4: WIM path preview ----
-$LblPWWimPreviewCap = New-Object System.Windows.Forms.Label
-$LblPWWimPreviewCap.Text      = "Preview:"
-$LblPWWimPreviewCap.Font      = $FontSmall
-$LblPWWimPreviewCap.ForeColor = $ColSubtext
-$LblPWWimPreviewCap.Location  = New-Object System.Drawing.Point(366, ($pp + 28))
-$LblPWWimPreviewCap.AutoSize  = $true
-$PWSecDetails.Controls.Add($LblPWWimPreviewCap)
+$pwy += 88 + 6
 
-$LblPWWimPreview = New-Object System.Windows.Forms.Label
-$LblPWWimPreview.Text      = ""
-$LblPWWimPreview.Font      = $FontSmall
-$LblPWWimPreview.ForeColor = [System.Drawing.Color]::FromArgb(0, 200, 80)
-$LblPWWimPreview.Location  = New-Object System.Drawing.Point(414, ($pp + 28))
-$LblPWWimPreview.Size      = New-Object System.Drawing.Size(284, 32)
-$PWSecDetails.Controls.Add($LblPWWimPreview)
+# ==============================================================================
+# PATCH WIM SECTION 3 - Destination (read-only, both sources)
+# Shows where the patched WIM will end up before Run is clicked. For the SCCM
+# source this is the folder of the package's current WIM (the SCCM tab's
+# Package path and the Options tab's output filename are not used in patch
+# mode). Inner: 10 + 34 path (2 lines) + 44 note (3 lines) + 8 bottom = 96
+# ==============================================================================
+$PWSecDest = New-PWSection $pwy 96
 
-$pp += 22
+$LblPWDestCap = New-Object System.Windows.Forms.Label
+$LblPWDestCap.Text      = "Destination:"
+$LblPWDestCap.Font      = $FontBold
+$LblPWDestCap.ForeColor = $ColSubtext
+$LblPWDestCap.Location  = New-Object System.Drawing.Point(14, 10)
+$LblPWDestCap.AutoSize  = $true
+$PWSecDest.Controls.Add($LblPWDestCap)
 
-# ---- Separator (left column only, doesn't cross into right) ----
-$PWDetSep = New-Object System.Windows.Forms.Panel
-$PWDetSep.Location  = New-Object System.Drawing.Point(14, $pp)
-$PWDetSep.Size      = New-Object System.Drawing.Size(338, 1)
-$PWDetSep.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$PWSecDetails.Controls.Add($PWDetSep)
-$pp += 8
+$LblPWDestValue = New-Object System.Windows.Forms.Label
+$LblPWDestValue.Text      = ""
+$LblPWDestValue.Font      = $FontSmall
+$LblPWDestValue.ForeColor = $ColSubtext
+$LblPWDestValue.Location  = New-Object System.Drawing.Point(110, 11)
+$LblPWDestValue.Size      = New-Object System.Drawing.Size(594, 34)
+$PWSecDest.Controls.Add($LblPWDestValue)
 
-# ---- LEFT: Action radios ----
-$RadPatchWimReplace = New-Object System.Windows.Forms.RadioButton
-$RadPatchWimReplace.Text      = "Replace existing package"
-$RadPatchWimReplace.Checked   = $true
-$RadPatchWimReplace.ForeColor = $ColFg
-$RadPatchWimReplace.BackColor = [System.Drawing.Color]::Transparent
-$RadPatchWimReplace.Font      = $FontMain
-$RadPatchWimReplace.AutoSize  = $true
-$RadPatchWimReplace.Location  = New-Object System.Drawing.Point(14, $pp)
-$PWSecDetails.Controls.Add($RadPatchWimReplace)
-$pp += 24
+$LblPWDestNote = New-Object System.Windows.Forms.Label
+$LblPWDestNote.Text      = ""
+$LblPWDestNote.Font      = $FontSmall
+$LblPWDestNote.ForeColor = $ColSubtext
+$LblPWDestNote.Location  = New-Object System.Drawing.Point(110, 45)
+$LblPWDestNote.Size      = New-Object System.Drawing.Size(594, 44)
+$PWSecDest.Controls.Add($LblPWDestNote)
 
-$RadPatchWimNew = New-Object System.Windows.Forms.RadioButton
-$RadPatchWimNew.Text      = "Create new package"
-$RadPatchWimNew.Checked   = $false
-$RadPatchWimNew.ForeColor = $ColFg
-$RadPatchWimNew.BackColor = [System.Drawing.Color]::Transparent
-$RadPatchWimNew.Font      = $FontMain
-$RadPatchWimNew.AutoSize  = $true
-$RadPatchWimNew.Location  = New-Object System.Drawing.Point(14, $pp)
-$PWSecDetails.Controls.Add($RadPatchWimNew)
-$pp += 26
+# Recheck: the existence check is cached per destination path (so Update-UI does
+# not hit the share on every keystroke). The cache is cleared and the line
+# refreshed by this button, when the window is reactivated (e.g. coming back
+# from Explorer after deleting the file) and when the Patch WIM tab is opened.
+# Run always does its own fresh check regardless of what the line shows.
+function Invoke-PatchWimDestinationRecheck {
+  $Script:PatchWimDestCheckedPath = ""
+  Update-PatchWimDestination
+}
+
+$BtnPWDestRecheck = New-Object System.Windows.Forms.Button
+$BtnPWDestRecheck.Text      = "Recheck"
+$BtnPWDestRecheck.Location  = New-Object System.Drawing.Point(14, 34)
+$BtnPWDestRecheck.Size      = New-Object System.Drawing.Size(76, 22)
+$BtnPWDestRecheck.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnPWDestRecheck.ForeColor = $ColFg
+$BtnPWDestRecheck.FlatStyle = "Flat"
+$BtnPWDestRecheck.Font      = $FontSmall
+$BtnPWDestRecheck.Add_Click({ Invoke-PatchWimDestinationRecheck })
+$PWSecDest.Controls.Add($BtnPWDestRecheck)
+
+$Form.Add_Activated({
+  if ($ChkPatchMode.Checked -and $Tabs.SelectedTab -eq $TabPatchWim) { Invoke-PatchWimDestinationRecheck }
+})
+$Tabs.Add_SelectedIndexChanged({
+  if ($ChkPatchMode.Checked -and $Tabs.SelectedTab -eq $TabPatchWim) { Invoke-PatchWimDestinationRecheck }
+})
 
 # ---- Wire up text-changed for previews ----
 $TxtPatchWimPkgName.Add_TextChanged({
-  if (-not $Script:PatchWimWritingPkgName) {
-    # user edit - preview updates, nothing else needed
-  }
   $resolved = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
   $LblPWPkgPreview.Text = if ($resolved.Trim()) { $resolved } else { "" }
   Update-UI
@@ -4719,10 +4971,13 @@ $TxtPatchWimPkgName.Add_TextChanged({
 
 $TxtPatchWimOutName.Add_TextChanged({
   $Script:PatchWimOutNameFromSource = $false
-  $resolved = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
-  $LblPWWimPreview.Text = if ($resolved.Trim()) { $resolved } else { "" }
   Update-UI
 })
+
+$RadPatchWimReplace.Add_CheckedChanged({ Update-UI })
+
+# Apply the initial enabled/disabled state (see Update-PatchWimControlState)
+Update-PatchWimControlState
 
 # ==============================================================================
 # TAB 8 - HELP
@@ -4816,6 +5071,13 @@ Output WIM:        Where to save the finished WIM. Auto-generated
 Skip updates:      Do not download or apply Patch Tuesday updates.
 Skip lang packs:   Build English-only image (no LP injection).
 Skip Appx removal: Keep all built-in apps.
+Skip Defender update:
+                   Do not copy Microsoft's offline Defender update
+                   (KB4568292: platform, engine, security intelligence)
+                   into the image. On by default, applied in both full
+                   builds and patch mode. The kit is downloaded on every
+                   build and cached in <ScriptFolder>\DefenderKit\.
+                   Failures are non-fatal - the build continues without it.
 Patch existing image:
   Instead of building from the ISO, patch an already-serviced WIM with
   the latest updates only. Language packs and app removal are skipped.
@@ -4949,6 +5211,8 @@ Enable patch mode:  Turns off the Languages / Applications / Features on
                     Demand tabs (read from the source WIM instead) and the
                     Skip updates / Skip lang packs / Skip Appx checkboxes
                     on the Options tab - none of those apply when patching.
+                    Skip Defender update stays available: the Defender
+                    update is applied in patch mode too.
 
 Source - choose one:
   From SCCM package:  Enter the 8-character Package ID (e.g. FC100042).
@@ -4959,22 +5223,34 @@ Source - choose one:
   Local WIM file:      Browse to a WIM already on disk (e.g. your last
                       build in Output\).
 
+Output path (Local file source only, below the WIM file):
+  Where the patched WIM is saved. Auto-fills from the source filename;
+  click {Date} to insert today's date, or Browse to pick a different
+  location or filename. Not used for the SCCM source.
+
 Package Name (SCCM source only):
   Click {Date} to insert today's date into the name. The preview line
   below shows the resolved name live.
 
-Output path (Local file source only):
-  Where the patched WIM is saved. Auto-fills from the source filename;
-  click {Date} to insert today's date, or Browse to pick a different
-  location or filename.
-
 Action (SCCM source only - has no effect for a local file):
-  Replace existing package:  Updates the SCCM package in place, keeping
-                             the same Package ID so task sequence
-                             references keep working. Recommended for
-                             routine monthly patching.
-  Create new package:        Creates a new OS Image package in SCCM
-                             instead of updating the one just patched from.
+  Update existing package:   Points the existing package (same Package
+                             ID, so task sequence references keep
+                             working) at the new WIM. The old WIM stays
+                             in the folder as a copy - delete it once the
+                             update is verified.
+  Create new package:        Creates a new OS Image package (in the root
+                             of Operating System Images) pointing at the
+                             new WIM. The original package and its WIM
+                             are not changed.
+
+Destination (read-only):
+  Where the patched WIM will end up. For the SCCM source this is always
+  the folder of the package's current WIM, under the source filename with
+  today's date; the SCCM tab's Package path and the Options tab's output
+  filename are not used in patch mode. The engine corrects the build
+  number in the name after servicing if the update changed it. An
+  existing file is never overwritten: if the destination name is taken
+  (or equals the current WIM), Run stops before building.
 
 Click > Run once configured. Only updates are downloaded and applied - no
 ISO discovery, language pack injection, driver injection, or Appx removal
@@ -5004,9 +5280,10 @@ MONTHLY PATCHING
    (e.g. your last build in Output\).
 3. Languages and apps are read automatically from the source WIM.
 4. Click Run - only updates are downloaded and applied.
-5. SCCM source updates the same package in place by default ("Replace
-   existing package"). Local file source: output filename matches the
-   source, with today's date.
+5. SCCM source: the patched WIM is saved next to the package's current
+   WIM and the same package is pointed at it by default ("Update existing
+   package"); the old WIM is kept. Local file source: saved to the Output
+   path.
 
 
 STANDALONE (NO GUI)
@@ -5274,7 +5551,7 @@ function Get-SettingsSnapshot {
   $driverSel = if ($Script:DriverTable) {
     (@($Script:DriverTable.Select("Include = true")) | ForEach-Object { [string]$_["InfPath"] } | Sort-Object) -join ";"
   } else { "" }
-  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkFixInboxAppLang.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
+  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkFixInboxAppLang.Checked)|$([int]$ChkSkipDefender.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
 }
 
 # -- Build command string -------------------------------------------------------
@@ -5292,7 +5569,12 @@ function Build-CommandString {
       $pkgName = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
       $wimArg  = if ($Script:PatchWimSCCMFileName) { $Script:PatchWimSCCMFileName } else { "<WIM from pkg $($TxtPatchWimPkgID.Text.Trim())>" }
       $cmd += " -PatchExistingWim `"$wimArg`""
-      $cmd += " -OutputPath `".\Output\`" -Unattended"
+      # The engine writes to the local Output folder; the GUI copies the result
+      # to the package folder afterwards (shown on the Destination line).
+      $cmd += " -OutputPath `"$(Join-Path $ScriptRoot 'Output')`""
+      if ($ChkSkipUpdates -and $ChkSkipUpdates.Checked) { $cmd += " -SkipUpdates" }
+      if ($ChkSkipDefender -and $ChkSkipDefender.Checked) { $cmd += " -SkipDefenderUpdate" }
+      $cmd += " -Unattended"
       return @{ Cmd = $cmd; SelectedCodes = @(); Preview = "" }
     } elseif ($localSrc) {
       $cmd += " -PatchExistingWim `"$($TxtPatchWim.Text)`""
@@ -5304,6 +5586,7 @@ function Build-CommandString {
     }
 
     if ($ChkSkipUpdates -and $ChkSkipUpdates.Checked) { $cmd += " -SkipUpdates" }
+    if ($ChkSkipDefender -and $ChkSkipDefender.Checked) { $cmd += " -SkipDefenderUpdate" }
     $cmd += " -Unattended"
     return @{ Cmd = $cmd; SelectedCodes = @(); Preview = "" }
   }
@@ -5341,6 +5624,7 @@ function Build-CommandString {
   if ($ChkSkipLPs.Checked)      { $cmd += " -SkipLanguagePacks" }
   if ($ChkSkipAppx.Checked)     { $cmd += " -SkipAppxRemoval" }
   if (-not $ChkFixInboxAppLang.Checked -and $ChkFixInboxAppLang.Enabled) { $cmd += " -SkipInboxAppLanguageFix" }
+  if ($ChkSkipDefender.Checked) { $cmd += " -SkipDefenderUpdate" }
   if ($FoDCheckboxes) {
     $previewFoDs = @($FoDCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
     if ($previewFoDs.Count -gt 0) { $cmd += " -FoDList `"$($previewFoDs -join ',')`"" }
@@ -5504,6 +5788,87 @@ function Update-DiskSpaceWarning {
   $LblDiskSpace.Visible = $true
 }
 
+# Patch WIM: name the patched WIM will get before servicing. Mirrors
+# WimWizard.ps1's patch-mode auto-name (source filename, date swapped to today).
+# WimWizard.ps1 5.7.2+ may still change the build number in the name after
+# servicing, if the applied LCU changed the image's build.UBR.
+function Get-PatchWimPredictedName {
+  param([string]$SourceName)
+  return ($SourceName -replace '_\d{8}\.wim$', "_$(Get-Date -Format 'yyyyMMdd').wim")
+}
+
+# Patch WIM: where the patched SCCM image will be written - always the folder
+# of the package's current WIM. Used by the Destination line, the pre-run check
+# and the post-build copy so all three agree.
+function Get-PatchWimSCCMDestination {
+  param([string]$SourceWim, [string]$WimName)
+  return (Join-Path (Split-Path $SourceWim -Parent) $WimName)
+}
+
+# Refreshes the read-only Destination line on the Patch WIM tab.
+function Update-PatchWimDestination {
+  if (-not $LblPWDestValue) { return }
+  $ok   = $ColFg
+  $bad  = [System.Drawing.Color]::FromArgb(220, 60, 60)
+  $note = ""
+  if (-not $ChkPatchMode.Checked) {
+    $LblPWDestValue.Text      = "Patch mode is off"
+    $LblPWDestValue.ForeColor = $ColSubtext
+    $LblPWDestNote.Text       = ""
+    return
+  }
+
+  if ($RadPWSrcSCCM.Checked) {
+    $src = $Script:PatchWimSCCMSourceWim
+    if (-not $src) {
+      $LblPWDestValue.Text      = "Enter a Package ID - the destination is the folder of the package's current WIM."
+      $LblPWDestValue.ForeColor = $ColSubtext
+      $LblPWDestNote.Text       = ""
+      return
+    }
+    $srcName = [System.IO.Path]::GetFileName($src)
+    $dest    = Get-PatchWimSCCMDestination -SourceWim $src -WimName (Get-PatchWimPredictedName $srcName)
+    if ($Script:PatchWimDestCheckedPath -ne $dest) {
+      $Script:PatchWimDestCheckedPath = $dest
+      $Script:PatchWimDestExists = Test-Path -LiteralPath "Microsoft.PowerShell.Core\FileSystem::$dest"
+    }
+    $LblPWDestValue.Text = $dest
+    $pkgID = $TxtPatchWimPkgID.Text.Trim()
+    if ($dest -ieq $src) {
+      $LblPWDestValue.ForeColor = $bad
+      $note = "Same name as the package's current WIM (no date in the name, or already patched today). Run will stop before building - the current WIM is never overwritten."
+    } elseif ($Script:PatchWimDestExists) {
+      $LblPWDestValue.ForeColor = $bad
+      $note = "A file with this name already exists. Run will stop before building - move or delete it first."
+    } else {
+      $LblPWDestValue.ForeColor = $ok
+      $buildNote = "Build number in the name is corrected after servicing if it changes."
+      if ($RadPatchWimReplace.Checked) {
+        $note = "$pkgID will point to this file. $srcName is kept as a copy. $buildNote"
+      } else {
+        $newName = $TxtPatchWimPkgName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+        $note = "New package `"$($newName.Trim())`" will point to this file. $pkgID and $srcName are not changed. $buildNote"
+      }
+    }
+    $LblPWDestNote.Text = $note
+    return
+  }
+
+  # Local WIM source
+  $srcWim = $TxtPatchWim.Text
+  if (-not $srcWim -or $srcWim -eq "Select existing WIM file...") {
+    $LblPWDestValue.Text      = "Select a local WIM file."
+    $LblPWDestValue.ForeColor = $ColSubtext
+    $LblPWDestNote.Text       = ""
+    return
+  }
+  $out = $TxtPatchWimOutName.Text -replace '\{Date\}', (Get-Date -Format 'yyyyMMdd')
+  if (-not $out.Trim()) { $out = Join-Path $ScriptRoot "Output\$([System.IO.Path]::GetFileName($srcWim))" }
+  $LblPWDestValue.Text      = $out
+  $LblPWDestValue.ForeColor = $ok
+  $LblPWDestNote.Text       = if ($out -ieq $srcWim) { "Overwrites the source WIM (it is copied to the work folder before servicing)." } else { "The name is used exactly as given." }
+}
+
 function Update-UI {
   $data = Build-CommandString
   $LblCmd.Text = $data.Cmd
@@ -5527,6 +5892,9 @@ function Update-UI {
   # Refresh SCCM package name preview
   Update-SCCMPreview
 
+  # Refresh the Patch WIM tab's read-only Destination line
+  Update-PatchWimDestination
+
   # Update ISO status indicators
   Update-ISOStatus
   Update-RunButton
@@ -5544,6 +5912,7 @@ $ChkSkipLPs.Add_CheckedChanged({ Update-LangSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-AppxSkipState; Update-UI })
 $ChkSkipAppx.Add_CheckedChanged({ Update-UI })
 $ChkFixInboxAppLang.Add_CheckedChanged({ Update-UI })
+$ChkSkipDefender.Add_CheckedChanged({ Update-UI })
 $TxtPatchWim.Add_TextChanged({ Update-UI })
 $TxtSource.Add_TextChanged({ Start-ISOProbe })
 
@@ -5658,6 +6027,24 @@ $Script:RunClick = {
         & $resetRunButton; return
       }
 
+      # ---- Destination check before a 30+ minute build ----
+      # The patched WIM always goes next to the package's current WIM under the
+      # patch-mode name. Neither the current WIM nor any other existing file is
+      # overwritten. Checked again after the build with the final name (the
+      # engine may correct the build number in it).
+      $predDest = Get-PatchWimSCCMDestination -SourceWim $wimFile.FullName -WimName (Get-PatchWimPredictedName $wimFile.Name)
+      $destProblem = $null
+      if ($predDest -ieq $wimFile.FullName) {
+        $destProblem = "The patched WIM would get the same name as the package's current WIM:`n$predDest`n`nThe name has no _yyyyMMdd date, or the image was already patched today. The current WIM is never overwritten."
+      } elseif (Test-Path -LiteralPath "Microsoft.PowerShell.Core\FileSystem::$predDest") {
+        $destProblem = "A file with the destination name already exists:`n$predDest`n`nMove or delete it, then run again."
+      }
+      if ($destProblem) {
+        [System.Windows.Forms.MessageBox]::Show($destProblem, "Destination not available", "OK", "Warning") | Out-Null
+        $Tabs.SelectedTab = $TabPatchWim
+        & $resetRunButton; return
+      }
+
       # ---- Copy WIM to working folder (already Defender-excluded in most configs) ----
       $tempDir = Join-Path $ScriptRoot "Output\WIMServicing_Work"
       if (-not (Test-Path $tempDir)) { New-Item -ItemType Directory -Path $tempDir -Force | Out-Null }
@@ -5676,14 +6063,15 @@ $Script:RunClick = {
       $Script:PatchSCCMContext = @{
         PkgID         = $pkgID
         PkgSourcePath = $uncPath
+        SourceWim     = $wimFile.FullName
         WimFileName   = $wimFile.Name
+        RunStart      = Get-Date
         LocalTempWim  = $localWim
         TempDir       = $tempDir
         NewPkgName    = $pkgName.Trim()
         CreateNew     = $RadPatchWimNew.Checked
         SiteCode      = $TxtSCCMSiteCode.Text.Trim()
         Server        = $TxtSCCMServer.Text.Trim()
-        PackagePath   = $TxtSCCMPath.Text.Trim()
         UpdateDPs     = $ChkSCCMUpdateDPs.Checked
         DPGroup       = Get-SelectedSCCMDPGroup
       }
@@ -5732,6 +6120,7 @@ $Script:RunClick = {
     }
 
     if ($ChkSkipUpdates.Checked) { $argList += "-SkipUpdates" }
+    if ($ChkSkipDefender.Checked) { $argList += "-SkipDefenderUpdate" }
     $argList += "-Unattended"
 
     $Script:IsPatch = $true
@@ -5740,16 +6129,12 @@ $Script:RunClick = {
     $launcherDir  = "$env:ProgramData\WimWizard"
     if (-not (Test-Path $launcherDir)) { New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null }
     $launcherPath = Join-Path $launcherDir "WimWizard_Launch.ps1"
-    $launcherLines = @(
-      "Set-Location '$($ScriptRoot -replace "'","''")'",
-      "& '$($MainScript -replace "'","''")'  $argStr",
-      "exit `$LASTEXITCODE"
-    )
-    Set-Content -Path $launcherPath -Value $launcherLines -Encoding UTF8
+    $Script:ConsoleLogPath = Write-WimWizardLauncher -LauncherPath $launcherPath -EngineArgs $argStr
 
     Save-Settings
     $Script:SettingsSnapshot = Get-SettingsSnapshot
     $psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$launcherPath`""
+    $Script:PatchRunStart = Get-Date   # only WIMs written after this count as this run's output
     $Script:BuildProc = Start-Process powershell.exe -ArgumentList $psArgs -Verb RunAs -PassThru
     $Script:LauncherPath = $launcherPath
     $Form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
@@ -5768,40 +6153,72 @@ $Script:RunClick = {
 
         try {
         $sccmFailed = $false
+
+        # GUI-side lines go to the engine's log for this run, or to the console
+        # transcript if the engine never got far enough to create its log.
+        $Script:PatchPostLogFile = Get-ChildItem -Path (Join-Path $ScriptRoot "Output") -Filter "WIMServicing_*.log" -ErrorAction SilentlyContinue |
+          Where-Object { $_.LastWriteTime -ge $Script:PatchRunStart } |
+          Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+        if (-not $Script:PatchPostLogFile -and $Script:ConsoleLogPath -and (Test-Path -LiteralPath $Script:ConsoleLogPath)) {
+          $Script:PatchPostLogFile = $Script:ConsoleLogPath
+        }
+
+        # Exit code 0 is not enough: require a WIM written during this run.
+        # (2026-11-02: exit code 0, no WIM, no engine log -> "Image patch
+        # complete!" with an SCCM failure underneath.) Also stops the SCCM step
+        # from ever picking up an older WIM left in Output\.
+        $Script:PatchNoOutput = $false
+        $Script:PatchNewWim   = $null
+        if ($succeeded) {
+          if ($Script:IsPatchSCCM) {
+            $Script:PatchNewWim = Get-ChildItem -Path $Script:PatchOutputFolder -Filter "*.wim" -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -ge $Script:PatchRunStart } |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          } elseif ($Script:BuiltWimPath -and (Test-Path -LiteralPath $Script:BuiltWimPath)) {
+            $Script:PatchNewWim = Get-Item -LiteralPath $Script:BuiltWimPath |
+              Where-Object { $_.LastWriteTime -ge $Script:PatchRunStart }
+          }
+          if (-not $Script:PatchNewWim) {
+            $succeeded = $false
+            $Script:PatchNoOutput = $true
+            Write-PatchPostLog "WimWizard.ps1 exited with code $exitCode but no WIM was written during this run - SCCM steps skipped" "ERROR"
+          }
+        }
+
         if ($succeeded) {
           # ---- SCCM patch copy-back ----
           if ($Script:IsPatchSCCM -and $Script:PatchSCCMContext) {
             $ctx = $Script:PatchSCCMContext
             $Script:CompletionPkgName = if ($ctx.NewPkgName) { $ctx.NewPkgName } else { "" }
+            $Script:PatchSCCMResultVerb = "updated"
+            $cmPushed = $false
             try {
-              # Find patched WIM in Output\ (newest .wim written by WimWizard.ps1)
-              $patchedWim = Get-ChildItem -Path $Script:PatchOutputFolder -Filter "*.wim" -ErrorAction SilentlyContinue |
-                            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              # Patched WIM written by WimWizard.ps1 during this run (verified above)
+              $patchedWim = $Script:PatchNewWim
               if (-not $patchedWim) { throw "Patched WIM not found in Output folder." }
               $Script:OutFile = $patchedWim.Name
 
+              # GUI-side steps are appended to the log resolved above, prefixed "GUI:".
+              Write-PatchPostLog "SCCM post-processing: package $($ctx.PkgID), mode $(if ($ctx.CreateNew) { 'create new package' } else { 'update existing package' })"
+              Write-PatchPostLog "Patched WIM: $($patchedWim.FullName)"
+
               # ---- ALL FILE OPS BEFORE entering CM PSDrive (avoids provider conflict) ----
-              $uncIsFile = $ctx.PkgSourcePath -match '\.(wim|esd)$'
-              $srcFolder = if ($uncIsFile) { Split-Path $ctx.PkgSourcePath -Parent } else { $ctx.PkgSourcePath }
-              $destWim   = if ($uncIsFile) { $ctx.PkgSourcePath } else { Join-Path $ctx.PkgSourcePath $ctx.WimFileName }
-
-              # Copy patched WIM back to UNC source path
-              [System.IO.File]::Copy($patchedWim.FullName, $destWim, $true)
-
-              # For CreateNew: determine new WIM destination and copy there too
-              $newPkgWimPath = $null
-              if ($ctx.CreateNew) {
-                $newWimName = $patchedWim.Name
-                $newWimDest = if ($ctx.PackagePath) {
-                  $newDir = Join-Path $ctx.PackagePath ($ctx.NewPkgName -replace '[\/:*?"<>|]', '_')
-                  if (-not (Test-Path $newDir)) { New-Item -ItemType Directory -Path $newDir -Force | Out-Null }
-                  Join-Path $newDir $newWimName
-                } else {
-                  Join-Path $srcFolder $newWimName
-                }
-                [System.IO.File]::Copy($patchedWim.FullName, $newWimDest, $true)
-                $newPkgWimPath = $newWimDest
+              # The patched WIM is written next to the package's current WIM under
+              # its own (new) name, in both modes. The current WIM is never written
+              # to: before 2.15.0 it was overwritten unconditionally, including in
+              # "Create new package" mode, and the new-package copy went to the SCCM
+              # tab's Package path plus a subfolder named after the package.
+              $destWim = Get-PatchWimSCCMDestination -SourceWim $ctx.SourceWim -WimName $patchedWim.Name
+              if ($destWim -ieq $ctx.SourceWim) {
+                throw "Destination has the same name as the package's current WIM ($destWim) - not overwritten. Patched WIM left in: $($patchedWim.FullName)"
               }
+              if (Test-Path -LiteralPath "Microsoft.PowerShell.Core\FileSystem::$destWim") {
+                throw "Destination already exists ($destWim) - not overwritten. Patched WIM left in: $($patchedWim.FullName)"
+              }
+              Write-PatchPostLog "Copying to: $destWim"
+              [System.IO.File]::Copy($patchedWim.FullName, $destWim, $false)   # overwrite:false as a second guard
+              Write-PatchPostLog "Copied. Current WIM left unchanged: $($ctx.SourceWim)"
+              $Script:OutFile = $destWim
 
               # Clean up local files before CM operations
               Remove-Item -Path $patchedWim.FullName -Force -ErrorAction SilentlyContinue
@@ -5813,24 +6230,39 @@ $Script:RunClick = {
                 New-PSDrive -Name $ctx.SiteCode -PSProvider CMSite -Root $ctx.Server -ErrorAction Stop | Out-Null
               }
               Push-Location "$($ctx.SiteCode):\" -ErrorAction Stop
+              $cmPushed = $true
               if ($ctx.CreateNew) {
-                $newPkg = New-CMOperatingSystemImage -Name $ctx.NewPkgName -Path $newPkgWimPath -ErrorAction Stop
+                $newPkg = New-CMOperatingSystemImage -Name $ctx.NewPkgName -Path $destWim -ErrorAction Stop
+                $Script:PatchSCCMResultVerb = "created"
+                $Script:CompletionPkgName   = "$($ctx.NewPkgName)  ($($newPkg.PackageID))"
+                Write-PatchPostLog "Package created: $($newPkg.PackageID) '$($ctx.NewPkgName)' -> $destWim (OS Images root node; $($ctx.PkgID) not changed)"
                 if ($ctx.UpdateDPs) { $newPkg | Update-CMDistributionPoint -ErrorAction SilentlyContinue }
-                Add-SCCMPackageToDPGroup -PackageID $newPkg.PackageID -DPGroupName $ctx.DPGroup -WimPath $newPkgWimPath
+                Add-SCCMPackageToDPGroup -PackageID $newPkg.PackageID -DPGroupName $ctx.DPGroup -WimPath $destWim
               } else {
                 if ($ctx.NewPkgName) {
                   Set-CMOperatingSystemImage -Id $ctx.PkgID -Path $destWim -NewName $ctx.NewPkgName -ErrorAction Stop
                 } else {
                   Set-CMOperatingSystemImage -Id $ctx.PkgID -Path $destWim -ErrorAction Stop
                 }
+                $Script:PatchSCCMResultVerb = "updated"
+                $pkgLabel = if ($ctx.NewPkgName) { $ctx.NewPkgName } else { $ctx.PkgID }
+                $Script:CompletionPkgName   = "$pkgLabel  ($($ctx.PkgID))"
+                Write-PatchPostLog "Package updated: $($ctx.PkgID) now points to $destWim (previous WIM kept: $($ctx.SourceWim))"
                 if ($ctx.UpdateDPs) { Get-CMOperatingSystemImage -Id $ctx.PkgID | Update-CMDistributionPoint -ErrorAction SilentlyContinue }
                 Add-SCCMPackageToDPGroup -PackageID $ctx.PkgID -DPGroupName $ctx.DPGroup -WimPath $destWim
               }
+              if ($ctx.UpdateDPs) { Write-PatchPostLog "Distribution point update requested" }
+              if ($ctx.DPGroup -and $ctx.DPGroup -ne "<None>") {
+                if ($Script:SCCMDPGroupFailReason) { Write-PatchPostLog "DP group '$($ctx.DPGroup)': $Script:SCCMDPGroupFailReason" "WARN" }
+                else { Write-PatchPostLog "DP group '$($ctx.DPGroup)': distribution started (or already a member)" }
+              }
               Pop-Location
+              $cmPushed = $false
             } catch {
-              Pop-Location -ErrorAction SilentlyContinue
+              if ($cmPushed) { Pop-Location -ErrorAction SilentlyContinue }
               $sccmFailed = $true
               $Script:SCCMFailReason = $_.Exception.Message
+              Write-PatchPostLog "SCCM post-processing failed: $($_.Exception.Message)" "ERROR"
             } finally {
               Remove-Item -Path $ctx.LocalTempWim -Force -ErrorAction SilentlyContinue
             }
@@ -5856,7 +6288,7 @@ $Script:RunClick = {
             $LblCompleteSCCM.Text    = [char]0x26A0 + "  SCCM update failed: $Script:SCCMFailReason"
             $LblCompleteSCCM.Visible = $true
           } elseif ($Script:SCCMDPGroupFailReason) {
-            $LblCompleteSCCM.Text    = [char]0x26A0 + "  Package updated, but DP group assignment failed: $Script:SCCMDPGroupFailReason"
+            $LblCompleteSCCM.Text    = [char]0x26A0 + "  Package $Script:PatchSCCMResultVerb, but DP group assignment failed: $Script:SCCMDPGroupFailReason"
             $LblCompleteSCCM.Visible = $true
           } else {
             $LblCompleteSCCM.Visible = $false
@@ -5864,10 +6296,10 @@ $Script:RunClick = {
         } else {
           $LblCompleteIcon.Text      = [char]0x2718
           $LblCompleteIcon.ForeColor = [System.Drawing.Color]::FromArgb(220, 60, 60)
-          $LblCompleteMsg.Text       = "Patch failed! (exit code $exitCode)"
+          $LblCompleteMsg.Text       = if ($Script:PatchNoOutput) { "Patch failed - no WIM was produced (exit code $exitCode)" } else { "Patch failed! (exit code $exitCode)" }
           $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
           $LblCompletePkg.Visible    = $false
-          $LblCompleteFile.Text      = "Check the log file in the Output folder for details."
+          $LblCompleteFile.Text      = "Check the WIMServicing log in the Output folder. Console output: $Script:ConsoleLogPath"
           $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
           $LblCompleteSCCM.Visible   = $false
           # Clean up temp on failure too
@@ -5990,6 +6422,7 @@ $Script:RunClick = {
   if ($ChkSkipUpdates.Checked)  { $argList += "-SkipUpdates" }
   if ($ChkSkipLPs.Checked)      { $argList += "-SkipLanguagePacks" }
   if (-not $ChkFixInboxAppLang.Checked -and $ChkFixInboxAppLang.Enabled) { $argList += "-SkipInboxAppLanguageFix" }
+  if ($ChkSkipDefender.Checked) { $argList += "-SkipDefenderUpdate" }
   # NOTE: -SkipAppxRemoval is NOT added here even when $ChkSkipAppx.Checked is true.
   # Checking that box (via Update-AppxSkipState) forces every app checkbox to
   # $false, so $checkedPkgs.Count is already 0 and the block above already added
@@ -6053,17 +6486,12 @@ $Script:RunClick = {
   if (-not (Test-Path $launcherDir)) { New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null }
   $launcherPath = Join-Path $launcherDir "WimWizard_Launch.ps1"
   $archSuffix = if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { " -ARM64" } else { "" }
-  $launcherLines = @(
-    "Set-Location '$($ScriptRoot -replace "'","''")'",
-    "& '$($MainScript -replace "'","''")'  $argStr$archSuffix",
-    "exit `$LASTEXITCODE"
-  )
+  $Script:ConsoleLogPath = Write-WimWizardLauncher -LauncherPath $launcherPath -EngineArgs "$argStr$archSuffix"
 
   $Script:OutFile      = [System.IO.Path]::GetFileName($out)
   $Script:BuiltWimPath = $out
   $Script:IsPatch      = $false
   $Script:CompletionPkgName = if ($ChkSCCMAutoImport -and $ChkSCCMAutoImport.Checked -and $Script:SCCMModuleAvailable) { Resolve-SCCMNameTemplate } else { "" }
-  Set-Content -Path $launcherPath -Value $launcherLines -Encoding UTF8
 
   Save-Settings
   $Script:SettingsSnapshot = Get-SettingsSnapshot
@@ -6127,7 +6555,7 @@ $Script:RunClick = {
         $LblCompleteMsg.Text       = "Build failed! (exit code $exitCode)"
         $LblCompleteMsg.ForeColor  = [System.Drawing.Color]::FromArgb(220, 60, 60)
         $LblCompletePkg.Visible    = $false
-        $LblCompleteFile.Text      = "Check the log file in the Output folder for details."
+        $LblCompleteFile.Text      = "Check the WIMServicing log in the Output folder. Console output: $Script:ConsoleLogPath"
         $BtnCompleteOK.BackColor   = [System.Drawing.Color]::FromArgb(220, 60, 60)
         $LblCompleteSCCM.Visible   = $false
       }
