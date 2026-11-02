@@ -30,7 +30,7 @@ Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 - **ISO version probe** — GUI reads the Windows ISO at startup (from filename or by mounting) to display the real build number in the filename preview
 - **26H2 support** - Wim Wizard supports Windows 26H2, tested! 
 - **Driver injection** - GUI lets you browse and select drivers to inject into your ISO. Folders can be selected with parameter as well.
-- **Defnder update** - Wim Wizard automatically downnloads and updates Windows Defender to the latest version. 
+- **Defender update** - Wim Wizard automatically downnloads and updates Windows Defender to the latest version. 
 ---
 
 ## Requirements
