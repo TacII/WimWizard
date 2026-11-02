@@ -192,7 +192,7 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 
 | Component         | Version                         |
 | ----------------- | -------------------------------- |
-| WimWizard.ps1     | 5.7.2                            |
+| WimWizard.ps1     | 5.7.3                            |
 | WimWizard-GUI.ps1 | 2.15.0                            |
 | Windows 11 target | 26H2 (26200.x)                 |
 
