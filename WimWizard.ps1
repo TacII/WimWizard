@@ -214,12 +214,36 @@
     If Enterprise edition cannot be auto-detected, the script will fail with
     an error rather than hang - use -WimIndex to specify the index explicitly.
 
-    Version     : 5.7.3
-    Date        : 2026-11-02
+    Version     : 5.8.1
+    Date        : 2026-11-03
     Requires    : Windows PowerShell 5.1+, Administrator rights, DISM
     Tested on   : Windows 11 25H2 (OS build 26200.x), Windows Server 2022
 
     CHANGELOG
+    5.8.1  Change: MSTeams removed from the default Appx removal list (used
+           when no -AppxListPath is given), matching the GUI default.
+    5.8.0  Change: Appx removal matches the exact DisplayName first and only
+           falls back to the old substring (-like "*name*") match when there
+           is no exact match. A fallback that matches more than one package is
+           logged as ambiguous and skipped instead of being passed to
+           Remove-AppxProvisionedPackage as an array (which failed). A package
+           matched by two list entries is removed once.
+           New: list entries not present in the image are logged
+           ("Appx not present in image (skipped): <name>"). Previously they
+           were skipped silently, so 9 of 25 selected apps "missing" from the
+           log looked like failures on 26H2 (7 were not in the image).
+           Fix: Dev Home was listed as DevHome_8wekyb3d8bbwe, which never
+           occurs in a DisplayName - never removed. Now
+           Microsoft.Windows.DevHome.
+           Fix: Teams was listed as MicrosoftTeams (old personal client);
+           24H2+ images ship the unified client as MSTeams. Key is now
+           MSTeams, label "MS Teams (unified)". Its Store ID in the inbox app
+           language fix catalog is $null until verified, so it is not
+           reinstalled at first logon.
+           Fix: the inbox app language fix reinstalled every kept catalog app
+           with a Store ID, including apps that were never in the image (e.g.
+           Journal or Whiteboard when unchecked). Kept apps are now limited to
+           packages that were provisioned in the image before removal.
     5.7.3  Fix: -SkipUpdates (and runs where no update path resolved) silently
            skipped drivers, language packs, language FoDs, RSAT FoDs, component
            cleanup and NetFx3, although the pre-run summary listed the FoDs.
@@ -674,7 +698,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$ScriptVersion = "5.7.3"
+$ScriptVersion = "5.8.1"
 $MinFreeSpaceGB = 30   # Minimum recommended free space at the output path
 
 # PowerShell has no native "/?" convention (that's cmd.exe/DOS) - "-?" is
@@ -1399,7 +1423,7 @@ $AppxToRemoveDefault = @(
     "Microsoft.BingSearch"                          # Bing Search
     "Clipchamp.Clipchamp"                           # Clipchamp
     "Microsoft.Copilot"                             # Copilot (Consumer)
-    "DevHome_8wekyb3d8bbwe"                         # Dev Home
+    "Microsoft.Windows.DevHome"                     # Dev Home
     "MicrosoftCorporationII.MicrosoftFamily"        # Family Safety
     "Microsoft.WindowsFeedbackHub"                  # Feedback Hub
     "Microsoft.GamingApp"                           # Gaming App (Xbox)
@@ -1413,7 +1437,6 @@ $AppxToRemoveDefault = @(
     "Microsoft.MicrosoftSolitaireCollection"        # Microsoft Solitaire
     "Microsoft.ZuneMusic"                           # Microsoft Store - Music
     "Microsoft.ZuneVideo"                           # Microsoft Store - Video
-    "MicrosoftTeams"                                # Microsoft Teams (Personal)
     "Microsoft.OutlookForWindows"                   # Outlook for Windows
     "MicrosoftCorporationII.QuickAssist"            # Quick Assist
     "Microsoft.Whiteboard"                          # Whiteboard
@@ -3528,21 +3551,44 @@ try {
     # Appx removal
     if (-not $SkipAppxRemoval) {
         Write-Section "Removing Appx packages"
-        $installed = Get-AppxProvisionedPackage -Path $mountDir
+        # Snapshot BEFORE removal - also used by the inbox app language fix
+        # below to tell which catalog apps were in the image at all.
+        $installed = @(Get-AppxProvisionedPackage -Path $mountDir)
         $removed   = 0
+        $handled   = New-Object 'System.Collections.Generic.HashSet[string]'
 
         foreach ($appx in $AppxToRemove) {
-            $pkg = $installed | Where-Object { $_.DisplayName -like "*$appx*" }
-            if ($pkg) {
-                try {
-                    Remove-AppxProvisionedPackage -Path $mountDir -PackageName $pkg.PackageName | Out-Null
-                    Write-OK "Removed: $($pkg.DisplayName)"
-                    Write-Log "Appx removed: $($pkg.DisplayName)"
-                    $removed++
-                } catch {
-                    Write-Warn "Could not remove: $($pkg.DisplayName)"
-                    Write-Log "WARN Appx: $($pkg.DisplayName)" "WARN"
-                }
+            # Exact DisplayName first: the GUI's scanned lists and the current
+            # catalog use exact names. The substring match is kept only as a
+            # fallback for custom/older lists, and only when unambiguous.
+            $how  = 'exact'
+            $pkgs = @($installed | Where-Object { $_.DisplayName -eq $appx })
+            if ($pkgs.Count -eq 0) {
+                $how  = 'wildcard'
+                $pkgs = @($installed | Where-Object { $_.DisplayName -like "*$appx*" })
+            }
+            if ($pkgs.Count -eq 0) {
+                Write-Info "Not in image: $appx"
+                Write-Log "Appx not present in image (skipped): $appx"
+                continue
+            }
+            if ($how -eq 'wildcard' -and $pkgs.Count -gt 1) {
+                $names = ($pkgs | ForEach-Object { $_.DisplayName }) -join ', '
+                Write-Warn "Ambiguous: '$appx' matches $($pkgs.Count) packages ($names) - skipped"
+                Write-Log "WARN Appx ambiguous (skipped): '$appx' matches $names - use the exact DisplayName" "WARN"
+                continue
+            }
+            $pkg = $pkgs[0]
+            if (-not $handled.Add([string]$pkg.PackageName)) { continue }   # already removed via another list entry
+            $suffix = if ($how -eq 'wildcard') { " (substring match for '$appx')" } else { '' }
+            try {
+                Remove-AppxProvisionedPackage -Path $mountDir -PackageName $pkg.PackageName | Out-Null
+                Write-OK "Removed: $($pkg.DisplayName)"
+                Write-Log "Appx removed: $($pkg.DisplayName)$suffix"
+                $removed++
+            } catch {
+                Write-Warn "Could not remove: $($pkg.DisplayName)"
+                Write-Log "WARN Appx: $($pkg.DisplayName)" "WARN"
             }
         }
         Write-Info "Removed: $removed of $($AppxToRemove.Count) candidates"
@@ -3584,7 +3630,7 @@ try {
         "Microsoft.WindowsCamera"                = "9WZDNCRFJBBG"
         "Clipchamp.Clipchamp"                    = "9P1J8S7CCWWT"
         "Microsoft.Copilot"                      = "XP9CXNGPPJ97XX"
-        "DevHome_8wekyb3d8bbwe"                  = "9N8MHTPHNGVV"
+        "Microsoft.Windows.DevHome"              = "9N8MHTPHNGVV"
         "MicrosoftCorporationII.MicrosoftFamily" = "9PDJDJS743XF"
         "Microsoft.WindowsFeedbackHub"           = "9NBLGGH4R32N"
         "Microsoft.GamingApp"                    = "9NZKPSTSNW4P"
@@ -3600,7 +3646,7 @@ try {
         "Microsoft.MicrosoftStickyNotes"         = "9NBLGGH4QGHW"
         "Microsoft.ZuneMusic"                    = "9WZDNCRFJ3PT"
         "Microsoft.ZuneVideo"                    = "9WZDNCRFJ3P2"
-        "MicrosoftTeams"                         = "9WZDNCRFJBMP"
+        "MSTeams"                                = $null   # TODO: verify Store/winget ID for unified Teams (was 9WZDNCRFJBMP under old "MicrosoftTeams" key)
         "Microsoft.Todos"                        = "9NBLGGH5R558"
         "Microsoft.WindowsNotepad"               = "9MSMLRH6LZF3"
         "Microsoft.OutlookForWindows"            = "9NRX63209R7B"
@@ -3617,13 +3663,19 @@ try {
         "Microsoft.WindowsTerminal"              = "9N0DX20HK701"
     }
 
-    # Determine kept apps: full catalog minus removal list, with a known Store ID
-    $keptApps = $AppxStoreIds.GetEnumerator() | Where-Object {
+    # Determine kept apps: catalog apps with a known Store ID that were in the
+    # image before removal ($installed, captured in the Appx removal step - this
+    # block only runs when that step ran) and are not in the removal list.
+    # Without the presence check, unchecked apps the image never contained
+    # (e.g. Journal, Whiteboard) were installed at first logon.
+    $presentNames = @($installed | ForEach-Object { [string]$_.DisplayName })
+    $keptApps = @($AppxStoreIds.GetEnumerator() | Where-Object {
         $entryKey   = $_.Key
         $entryValue = $_.Value
         $entryValue -ne $null -and
+        @($presentNames | Where-Object { $_ -eq $entryKey -or $_ -like "*$entryKey*" }).Count -gt 0 -and
         -not ($AppxToRemove | Where-Object { $entryKey -like "*$_*" -or $_ -like "*$entryKey*" })
-    } | Sort-Object Key
+    } | Sort-Object Key)
 
     Write-Info "Apps kept in image with Store IDs: $($keptApps.Count)"
     foreach ($a in $keptApps) { Write-Log "  Kept app: $($a.Key) -> $($a.Value)" }

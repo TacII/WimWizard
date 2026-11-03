@@ -14,11 +14,171 @@
   Contact : bWF0aGlhcy5oYWFzQGZpZGVsaXR5Y29uc3VsdGluZy5zZQ== (base64)
   License : GNU General Public License v3.0 (GPL-3.0)
             https://www.gnu.org/licenses/gpl-3.0.html
-  Version : 2.15.1
+  Version : 2.17.3
   Product : WIM Wizard (tribute to WIM Witch by Donna Ryan)
   Requires: Windows PowerShell 5.1+
 
   CHANGELOG
+  2.17.3 Change: the spinner in place of Run now runs for the whole
+         application scan - ISO mount, image mount, package read, and the
+         background dismount of image and ISO after the list is shown - and
+         for an orphan scan from an earlier session that is still
+         dismounting. Previously only Start-ISOProbe started and stopped the
+         spinner; Set-AppScanLock hid Run during a scan but showed nothing in
+         its place, so the bottom bar was empty for the 3-5 minutes. The
+         spinner is now started and stopped in Set-AppScanLock, which already
+         brackets the scan from start to process exit. A probe and a scan
+         never run at the same time (each refuses while the other runs), so
+         they do not stop each other's spinner; after an orphan scan the
+         follow-up probe starts it again.
+  2.17.2 Change: the open Windows ISO list shows the description and the
+         file name on the same row (file name after it, still semibold and
+         brighter); one row height again. The open list is sized to the
+         longest row, capped at the screen width.
+  2.17.1 Change: no automatic Windows ISO pick. With several ISOs in the
+         folder the dropdown starts empty ("Choose a Windows ISO...") and
+         nothing is read or probed until one is chosen; Run stays hidden.
+         Pre-selected only with the choice saved from the last session (if
+         that ISO is still there) or when the folder has exactly one ISO.
+         Change: the closed dropdown shows only the badge and the short
+         description (release, size, date) and is now 380 px like the
+         edition dropdown; the open list shows the description and, on a
+         second line, the ISO file name in brighter semibold text.
+  2.17.0 New: permanent "Windows ISO" dropdown on the Options tab, replacing
+         the x64/ARM64 radio buttons and the modal picker that appeared when
+         an architecture had more than one ISO. It lists every Windows ISO in
+         the source folder with a coloured x64/ARM64 badge, release (from the
+         file name), size, date and file name; the full path is in the
+         tooltip. The selected ISO decides the architecture (-ARM64, LP ISO,
+         FoD availability, "_arm64" in the file name), is always passed as
+         -WindowsISOPath, and is the only ISO the probe reads (the second
+         ARM64 read added in 2.16.7 is gone). Saved in the registry
+         (WindowsISO, file name); a new folder defaults to the most recently
+         modified x64 ISO. The release-mismatch notice from 2.16.8 is gone
+         with the second ISO.
+         Change: ARM64 was previously only treated as ARM64 when the folder
+         also held an x64 ISO; a folder with only an ARM64 ISO was built
+         without -ARM64. The architecture now always follows the selected ISO.
+  2.16.8 Fix: with ARM64 selected, the edition list, the WIM index map
+         (-WimIndex for non-Enterprise editions) and the build/release in the
+         output file name all came from the x64 ISO - assuming both ISOs are
+         the same release. With e.g. 26H2 x64 + 25H2 ARM64 in the folder the
+         file name said 26H2, and -WimIndex could select a different edition
+         (or none) in the ARM64 WIM. Each architecture now uses its own WIM's
+         editions, indexes and build (Apply-ArchEditionInfo on probe
+         completion and architecture switch; ARM64 from the metadata the
+         probe reads since 2.16.7). The selected edition is kept by name
+         across a switch. A notice next to the architecture buttons shows
+         when the two ISOs are different releases or builds, or when the ARM64 ISO
+         could not be read (then the x64 data is used, as before).
+  2.16.7 New: the Languages tab is greyed out when no Language Pack ISO for
+         the active architecture is in the source folder, with the hint
+         "Language packs can only be selected with a language pack ISO in
+         the Source Folder." The selection is kept and comes back when an LP
+         ISO is found. Update-LangSkipState made idempotent for this.
+         Fix: Save-Settings stored the greyed (all unchecked) language state
+         while Skip language packs was on, losing the saved languages; it now
+         saves the real selection (Get-SavedLanguageSelection).
+         Fix: Build application list stayed greyed with ARM64 selected. The
+         ARM64 edition is now matched by name (index numbers may differ from
+         the x64 WIM, which the edition list comes from), the ISO probe waits
+         up to 5 s for the ARM64 drive letter and reports ARM64 read problems
+         to the console instead of ignoring them, and the status line says
+         when the ARM64 image could not be read. Root cause not confirmed.
+         Change: the button reads "Scanning..." during a scan (a rescan left
+         it on "Rebuild application list"); the console shows when the list
+         was ready, when the controls were unlocked, and each scan step's
+         time, to diagnose slow unlocks. The scan also waits up to 5 s for
+         the ISO drive letter.
+  2.16.6 Change: typical scan time shown as "200-300 s" (3-5 minutes) in the
+         (i) tooltip and the scan status line, replacing the single 330 s
+         figure ($Script:AppScanTypicalText).
+         Fix: the disabled "Build application list" button ("Dismounting
+         image...") was nearly unreadable - WinForms draws disabled text in
+         dark grey. The button is now never Enabled = $false; the new
+         Set-BuildAppListEnabled sets a flag checked by the click handler,
+         light grey text ($ColSubtext) and no hover/press highlight.
+  2.16.5 Fix: Run asked about a missing Language Pack ISO with no languages
+         selected. The LP indicator (and the prompt, which keyed off its
+         colour) treated the LP ISO as required whenever "Skip language
+         packs" was unchecked. New Test-LPISONeeded: required only for
+         selected languages (unless skipped) or selected Features on Demand,
+         matching $needLPISO in WimWizard.ps1; otherwise the indicator shows
+         "- Language Pack ISO" in grey. The prompt now says why it is needed.
+         Fix: answering No to the missing-LP prompt or to "No languages
+         selected" left the Run button stuck on "Running..." - both now call
+         $resetRunButton before returning.
+  2.16.4 Fix: the Applications tab status line was cut off during the
+         background dismount. Removed "on <computer>" from the verified
+         text, and the dismount notice moved from the status line to the
+         (disabled) button, which reads "Dismounting image..." until it ends.
+         The scan progress line no longer repeats "the image is not changed"
+         (it is in the (i) tooltip), so it fits too.
+         Fix: "Application Compatibility Enhancements" was cut off in its
+         column; label shortened to "App Compatibility Enhancements".
+  2.16.3 New: white (i) after "Build application list" with a hover tooltip:
+         what the scan does, that it is read-only, typical duration (330 s
+         measured on a 26H2 Enterprise index), background dismount, caching.
+         The scan status line also shows the typical duration.
+         Fix: text in the Applications tab buttons sat ~1 px high (6 px above
+         the glyphs, 8 px below); 2 px top padding added.
+  2.16.2 Change: MS Teams (unified) is no longer a default - it is the
+         client people use for work Teams.
+         New catalog entries (friendly names for packages found by scanning
+         26H2 Pro/Enterprise), both default off: Application Compatibility
+         Enhancements (Microsoft.ApplicationCompatibilityEnhancements) and
+         Cross Device Experience Host (MicrosoftWindows.CrossDevice).
+         Change: MicrosoftWindows.Client.WebExperience (Windows Web Experience
+         Pack, runs the Widgets board) added to $AppxProtected - hidden from
+         scanned lists.
+  2.16.1 Fix: Build application list failed on a real 26H2 Enterprise image
+         after ~11 minutes with "Class not registered" (0x80040154). Which
+         call failed was not recorded. The scan now runs as a separate hidden
+         Windows PowerShell process (-STA, the same powershell.exe the builds
+         use) instead of Start-Job. Cause confirmed on the same machine:
+         Get-AppxProvisionedPackage -Path returns 47 packages directly and
+         throws "Class not registered" inside Start-Job, while Get-WindowsImage
+         works in a job (the ISO probe). If it still fails, the scan
+         falls back to dism.exe /English /Get-ProvisionedAppxPackages and
+         parses its output. Each step is logged with a timestamp to
+         %TEMP%\WimWizard-AppScan-<id>.log; on failure the message box shows
+         the step, message, HRESULT and error ID, and the log is kept.
+         Change: the package list is shown and saved as soon as it has been
+         read; the image and ISO are dismounted afterwards in the background.
+         Run and the source/edition/arch controls stay locked until that
+         dismount finishes (it removes the ISO). The process survives the GUI
+         being closed and still dismounts; a GUI started meanwhile detects it
+         via %TEMP%\WimWizard-AppScan.lock and waits for it before probing.
+  2.16.0 New: "Build application list" on the Applications tab. Mounts the
+         selected image index read-only, reads its provisioned Appx packages
+         and shows those instead of the built-in catalog. Results are cached
+         per image in %ProgramData%\WimWizard\appx-cache.json, keyed on the
+         index's EditionId, Architecture, Version, SPBuild and Languages
+         (read by Start-ISOProbe from WIM metadata, so selecting an already
+         scanned edition needs no mount). An optional
+         WimWizard-KnownImages.json next to the script (same format) is read
+         as a fallback. Status line shows whether the list is verified for
+         the selected image. Catalog entries supply friendly names and
+         defaults; unknown packages show their DisplayName, unchecked;
+         protected packages ($AppxProtected: Windows Security UI, App
+         Installer, Store, codec extensions) are hidden. During a scan the
+         source/edition/arch controls and Run are locked, because the probe
+         and the scan both dismount the ISO when they finish.
+         Change: app selections are kept per package key ($Script:AppChoice)
+         across list rebuilds and saved from there, so choices for apps not
+         in the current image survive switching images. Skip Appx removal no
+         longer erases the saved selection.
+         Fix: Dev Home was keyed as DevHome_8wekyb3d8bbwe, which never occurs
+         in a DisplayName, so it was never removed. Now
+         Microsoft.Windows.DevHome (saved settings are migrated).
+         Fix: "Microsoft Teams (Personal)" was keyed as MicrosoftTeams; 24H2+
+         images ship the unified client as MSTeams. Renamed to
+         "MS Teams (unified)", key MSTeams. A saved MicrosoftTeams selection
+         is deliberately not migrated.
+         Fix: Check all / Uncheck all / Check defaults changed checkboxes
+         that were disabled by Skip Appx removal.
+         New catalog entries: Clock (Microsoft.WindowsAlarms) and Power
+         Automate (Microsoft.PowerAutomateDesktop), both default off.
   2.15.1 Fix: after a build, the console showed "You cannot call a method on a
          null-valued expression" at $t.Stop(); $t.Dispose() every 2 s, and the
          completion panel came back after OK. Root cause: both build timer
@@ -1129,11 +1289,15 @@ $RegPath = "HKCU:\Software\FidelityConsulting\WimWizard"
 
 function Save-Settings {
   if (-not (Test-Path $RegPath)) { New-Item $RegPath -Force | Out-Null }
-  $selLangs = ($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key }) -join ","
+  $selLangs = (Get-SavedLanguageSelection) -join ","
   Set-ItemProperty $RegPath -Name "Languages"    -Value $selLangs
-  $selApps  = ($AppCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key }) -join ","
+  # From $Script:AppChoice, not the visible checkboxes: keeps choices for apps
+  # that are not in the currently selected image (see Build-AppCheckboxes).
+  $selApps  = (Get-SelectedAppKeys) -join ","
   Set-ItemProperty $RegPath -Name "Apps"         -Value $selApps
   Set-ItemProperty $RegPath -Name "SourceFolder" -Value $TxtSource.Text
+  $winIsoName = if ($Script:SelectedWinISO) { $Script:SelectedWinISO.Name } else { "" }
+  Set-ItemProperty $RegPath -Name "WindowsISO"   -Value $winIsoName
   Set-ItemProperty $RegPath -Name "SkipUpdates"  -Value ([int]$ChkSkipUpdates.Checked)
   # Only save SkipLPs if it was a genuine user choice (not force-locked by ARM64)
   if ($ChkSkipLPs.Enabled) {
@@ -1180,11 +1344,21 @@ function Load-Settings {
       }
     }
     if ($reg.PSObject.Properties["Apps"]) {
-      foreach ($cb in $AppCheckboxes.Values) { $cb.Checked = $false }
-      foreach ($pkg in $reg.Apps.Split(",")) {
-        if ($pkg -and $AppCheckboxes.ContainsKey($pkg)) { $AppCheckboxes[$pkg].Checked = $true }
+      # Every catalog key and every currently shown key starts unchecked, then
+      # the saved keys are set - including keys not in the current list.
+      $Script:AppChoice = @{}
+      foreach ($k in $AppxData.Keys)      { $Script:AppChoice[[string]$k] = $false }
+      foreach ($k in $AppCheckboxes.Keys) { $Script:AppChoice[[string]$k] = $false }
+      foreach ($pkg in "$($reg.Apps)".Split(",")) {
+        if (-not $pkg) { continue }
+        if ($Script:AppKeyRenames.ContainsKey($pkg)) { $pkg = $Script:AppKeyRenames[$pkg] }
+        $Script:AppChoice[$pkg] = $true
       }
+      Set-AppCheckboxesFromChoice
     }
+    # Before SourceFolder: setting the folder probes it, and the dropdown
+    # should preselect the saved ISO.
+    if ($reg.PSObject.Properties["WindowsISO"] -and $reg.WindowsISO) { $Script:SavedWinISOName = [string]$reg.WindowsISO }
     if ($reg.PSObject.Properties["SourceFolder"] -and $reg.SourceFolder) { $TxtSource.Text = $reg.SourceFolder }
     if ($reg.PSObject.Properties["SkipUpdates"])  { $ChkSkipUpdates.Checked = [bool]$reg.SkipUpdates }
     if ($reg.PSObject.Properties["SkipLPs"])      { $ChkSkipLPs.Checked     = [bool]$reg.SkipLPs     }
@@ -1284,12 +1458,15 @@ foreach ($l in $_langs) { $LanguageData[$l.Code] = @{ Name=$l.Name; Locales=$l.L
 
 $AppxData = [ordered]@{}
 $_apps = @(
+  @{ Pkg='Microsoft.ApplicationCompatibilityEnhancements'; Name='App Compatibility Enhancements';   Default=$false }
   @{ Pkg='Microsoft.BingSearch';                        Name='Bing Search';                         Default=$true  }
   @{ Pkg='Microsoft.WindowsCalculator';                 Name='Calculator';                          Default=$false }
   @{ Pkg='Microsoft.WindowsCamera';                     Name='Camera';                              Default=$false }
   @{ Pkg='Clipchamp.Clipchamp';                         Name='Clipchamp';                           Default=$true  }
+  @{ Pkg='Microsoft.WindowsAlarms';                     Name='Clock';                               Default=$false }
   @{ Pkg='Microsoft.Copilot';                           Name='Copilot (Consumer)';                  Default=$true  }
-  @{ Pkg='DevHome_8wekyb3d8bbwe';                       Name='Dev Home';                            Default=$true  }
+  @{ Pkg='MicrosoftWindows.CrossDevice';                Name='Cross Device Experience Host';        Default=$false }
+  @{ Pkg='Microsoft.Windows.DevHome';                   Name='Dev Home';                            Default=$true  }
   @{ Pkg='MicrosoftCorporationII.MicrosoftFamily';      Name='Family Safety';                       Default=$true  }
   @{ Pkg='Microsoft.WindowsFeedbackHub';                Name='Feedback Hub';                        Default=$true  }
   @{ Pkg='Microsoft.GamingApp';                         Name='Gaming App (Xbox)';                   Default=$true  }
@@ -1305,11 +1482,12 @@ $_apps = @(
   @{ Pkg='Microsoft.MicrosoftStickyNotes';              Name='Microsoft Sticky Notes';              Default=$false }
   @{ Pkg='Microsoft.ZuneMusic';                         Name='Microsoft Store - Music';             Default=$true  }
   @{ Pkg='Microsoft.ZuneVideo';                         Name='Microsoft Store - Video';             Default=$true  }
-  @{ Pkg='MicrosoftTeams';                              Name='Microsoft Teams (Personal)';          Default=$true  }
+  @{ Pkg='MSTeams';                                     Name='MS Teams (unified)';                  Default=$false }
   @{ Pkg='Microsoft.Todos';                             Name='Microsoft To Do';                     Default=$false  }
   @{ Pkg='Microsoft.WindowsNotepad';                    Name='Notepad';                             Default=$false }
   @{ Pkg='Microsoft.OutlookForWindows';                 Name='Outlook for Windows';                 Default=$true  }
   @{ Pkg='Microsoft.Paint';                             Name='Paint';                               Default=$false }
+  @{ Pkg='Microsoft.PowerAutomateDesktop';              Name='Power Automate';                      Default=$false }
   @{ Pkg='MicrosoftCorporationII.QuickAssist';          Name='Quick Assist';                        Default=$true  }
   @{ Pkg='Microsoft.ScreenSketch';                      Name='Snipping Tool';                       Default=$false }
   @{ Pkg='Microsoft.WindowsSoundRecorder';              Name='Sound Recorder';                      Default=$false }
@@ -1322,14 +1500,40 @@ $_apps = @(
   @{ Pkg='Microsoft.WindowsTerminal';                   Name='Windows Terminal';                    Default=$false }
 )
 foreach ($a in $_apps) { $AppxData[$a.Pkg] = @{ Name=$a.Name; Default=$a.Default } }
+
+# Provisioned packages that are never offered for removal when the list comes
+# from an image scan (Build application list): Windows Security UI, App
+# Installer (winget - also needed by the inbox app language fix), the Store and
+# its purchase component, the codec extensions Photos and Media Player use, and
+# the Windows Web Experience Pack (MicrosoftWindows.Client.WebExperience), which
+# runs the Widgets board; sources also warn that removing it can destabilize
+# the shell UI. Exact DisplayNames.
+$Script:AppxProtected = @(
+  'Microsoft.SecHealthUI'
+  'Microsoft.DesktopAppInstaller'
+  'Microsoft.WindowsStore'
+  'Microsoft.StorePurchaseApp'
+  'Microsoft.AV1VideoExtension'
+  'Microsoft.AVCEncoderVideoExtension'
+  'Microsoft.HEIFImageExtension'
+  'Microsoft.HEVCVideoExtension'
+  'Microsoft.MPEG2VideoExtension'
+  'Microsoft.RawImageExtension'
+  'Microsoft.VP9VideoExtensions'
+  'Microsoft.WebMediaExtensions'
+  'Microsoft.WebpImageExtension'
+  'MicrosoftWindows.Client.WebExperience'
+)
 $Script:BuildString = '26200.xxxx'
 $Script:EditionTag      = '25H2'   # Updated by ISO probe: '25H2', 'LTSC2024', etc.
 $Script:EditionIndexMap = @{}        # Maps ComboBox item position -> WIM index number
 $Script:HasX64   = $false   # x64 Windows ISO found in source folder
 $Script:HasArm64 = $false   # arm64 Windows ISO found in source folder
-$Script:ChosenWinISO          = @{ x64 = $null; arm64 = $null }  # User's pick when >1 Windows ISO exists for that arch
-$Script:ChosenWinISOSignature = @{ x64 = $null; arm64 = $null }  # Fingerprint of the candidate set the pick was made against - invalidated (re-prompts) if it changes
-$Script:SavedLangState = @{}  # Saved checkbox states when Skip Languages is active
+$Script:SavedLangState = @{}  # Saved checkbox states while the language boxes are locked
+$Script:LangLocked     = $false
+$Script:LPISOFound     = $null  # $null until Update-ISOStatus has checked the source folder
+$Script:LangStateUpdating = $false
+$Script:LangLockReady  = $false
 $Script:MinFreeSpaceGB = 30   # Minimum recommended free space at the output path
 
 
@@ -1664,11 +1868,11 @@ function Get-FilenamePreview {
     return "Win11_${osVer}${edSuffix}_${BuildStr}_en_$(Get-Date -Format 'yyyyMMdd').wim"
   }
   $langStr = ($SelectedCodes | Sort-Object) -join "_"
-  $archStr = if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { "_arm64" } else { "" }
+  $archStr = if ((Get-ActiveWimWizardArch) -eq 'arm64') { "_arm64" } else { "" }
   return "Win11_${osVer}${edSuffix}_${BuildStr}_${langStr}${archStr}_$(Get-Date -Format 'yyyyMMdd').wim"
 }
 
-$WimWizardVersion = "2.15.1"
+$WimWizardVersion = "2.17.3"
 
 # Read the main script version dynamically so the ribbon always stays in sync
 $_scriptVersionLine = Get-Content $MainScript -ErrorAction SilentlyContinue |
@@ -1987,163 +2191,116 @@ $BtnRefreshSrc.FlatStyle = "Flat"
 $TabOpts.Controls.Add($BtnRefreshSrc)
 $BtnRefreshSrc.Add_Click({ Start-ISOProbe })
 
-# Modal picker shown when more than one Windows OS ISO (same architecture)
-# exists in the source folder - e.g. an old ISO left behind after a newer
-# one was downloaded. Returns the chosen [System.IO.FileInfo], or $null if
-# the user cancelled. Rows are sorted newest-first since the most likely
-# intent is "use the ISO I just downloaded".
-function Select-WindowsISO {
-  param(
-    [Parameter(Mandatory)][object[]]$Candidates,
-    [string]$ArchLabel = ""
-  )
+# ---- Windows ISO selection (2.17.0) -----------------------------------------
+# One permanent "Windows ISO" dropdown on the Options tab lists every Windows
+# OS ISO in the source folder, x64 and ARM64 together, with an architecture
+# badge, release, size and date. The selected ISO decides the architecture,
+# so the x64/ARM64 radio buttons and the modal picker that appeared when an
+# architecture had more than one ISO (Select-WindowsISO /
+# Resolve-WindowsISOChoices, 2.x - 2.16.8) are gone. The probe reads only the
+# selected ISO, and it is always passed to WimWizard.ps1 as -WindowsISOPath.
+$Script:SelectedWinISO  = $null   # [System.IO.FileInfo] of the selected ISO
+$Script:SavedWinISOName = $null   # file name restored from the registry
+$Script:WinISOListSig   = $null   # fingerprint of the listed candidate set
+$Script:WinISOUpdating  = $false  # suppresses SelectedIndexChanged while (re)filling
 
-  $sorted = @($Candidates | Sort-Object LastWriteTime -Descending)
-
-  $dlg = New-Object System.Windows.Forms.Form
-  $dlg.Text            = "Multiple Windows ISOs Found"
-  $dlg.FormBorderStyle = "FixedDialog"
-  $dlg.MaximizeBox     = $false
-  $dlg.MinimizeBox     = $false
-  $dlg.StartPosition   = "CenterParent"
-  $dlg.ClientSize      = New-Object System.Drawing.Size(580, 340)
-  $dlg.BackColor       = $ColBg
-  $dlg.ForeColor       = $ColFg
-  $dlg.Font            = $FontMain
-
-  $archSuffix = if ($ArchLabel) { " ($ArchLabel)" } else { "" }
-  $lbl = New-Object System.Windows.Forms.Label
-  $lbl.Text      = "Multiple Windows ISOs found in source folder$archSuffix, please choose one:"
-  $lbl.Location  = New-Object System.Drawing.Point(12, 12)
-  $lbl.Size      = New-Object System.Drawing.Size(556, 36)
-  $lbl.ForeColor = $ColFg
-  $lbl.Font      = $FontBold
-  $dlg.Controls.Add($lbl)
-
-  $list = New-Object System.Windows.Forms.ListBox
-  $list.Location      = New-Object System.Drawing.Point(12, 52)
-  $list.Size          = New-Object System.Drawing.Size(556, 234)
-  $list.BackColor     = [System.Drawing.Color]::FromArgb(55, 55, 55)
-  $list.ForeColor     = $ColFg
-  $list.BorderStyle   = "FixedSingle"
-  $list.IntegralHeight = $false
-  $list.Font          = $FontMain
-  foreach ($iso in $sorted) {
-    $sizeGB = [math]::Round($iso.Length / 1GB, 1)
-    $list.Items.Add("$($iso.Name)   [$sizeGB GB - modified $($iso.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))]") | Out-Null
-  }
-  $list.SelectedIndex = 0
-  $list.Add_DoubleClick({ $dlg.DialogResult = "OK"; $dlg.Close() })
-  $dlg.Controls.Add($list)
-
-  $btnOK = New-Object System.Windows.Forms.Button
-  $btnOK.Text         = "Use selected"
-  $btnOK.Location     = New-Object System.Drawing.Point(372, 298)
-  $btnOK.Size         = New-Object System.Drawing.Size(100, 26)
-  $btnOK.BackColor    = $ColAccent
-  $btnOK.ForeColor    = $ColFg
-  $btnOK.FlatStyle    = "Flat"
-  $btnOK.DialogResult = "OK"
-  $dlg.Controls.Add($btnOK)
-  $dlg.AcceptButton = $btnOK
-
-  $btnCancel = New-Object System.Windows.Forms.Button
-  $btnCancel.Text         = "Cancel"
-  $btnCancel.Location     = New-Object System.Drawing.Point(478, 298)
-  $btnCancel.Size         = New-Object System.Drawing.Size(90, 26)
-  $btnCancel.BackColor    = [System.Drawing.Color]::FromArgb(60, 60, 60)
-  $btnCancel.ForeColor    = $ColFg
-  $btnCancel.FlatStyle    = "Flat"
-  $btnCancel.DialogResult = "Cancel"
-  $dlg.Controls.Add($btnCancel)
-  $dlg.CancelButton = $btnCancel
-
-  $result = $dlg.ShowDialog($Form)
-  $dlg.Dispose()
-  if ($result -eq "OK" -and $list.SelectedIndex -ge 0) {
-    return $sorted[$list.SelectedIndex]
-  }
-  return $null
-}
-
-# Scans the source folder for Windows OS ISOs (LP/language ISOs excluded,
-# same filter as Update-ISOStatus/Update-ArchPanel), split by architecture.
-# When an architecture has more than one candidate, prompts via
-# Select-WindowsISO rather than silently guessing - the previous behavior
-# (pick the first match, in whatever order the filesystem returns) meant an
-# old ISO left in the folder after downloading a newer one could get built
-# instead, or a corrupt/partial leftover file could hang the probe/mount
-# indefinitely. The choice is cached per architecture and keyed to a
-# signature of the candidate set (path+size+modified time), so re-probing
-# the same unchanged folder (Refresh, a no-op edit to the path, etc.) does
-# not re-prompt; adding, removing, or replacing a candidate ISO changes the
-# signature and prompts again. Returns @{ x64 = <FileInfo|$null>; arm64 = <FileInfo|$null> }.
-function Resolve-WindowsISOChoices {
-  param([string]$Folder)
-
-  $choice = @{ x64 = $null; arm64 = $null }
-  if (-not $Folder -or -not (Test-Path $Folder -PathType Container)) { return $choice }
-
-  $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
-               Where-Object {
-                 $_.Extension -match '^\.iso$' -and
-                 $_.Name -notmatch 'langpack|language.?pack|lang_pack|_lp_'
-               })
-  if ($winISOs.Count -eq 0) { return $choice }
-
-  foreach ($arch in @('x64', 'arm64')) {
-    $bucket = if ($arch -eq 'arm64') {
-      @($winISOs | Where-Object { $_.Name -match 'arm64' })
-    } else {
-      @($winISOs | Where-Object { $_.Name -notmatch 'arm64' })
-    }
-    if ($bucket.Count -eq 0) { continue }
-    if ($bucket.Count -eq 1) { $choice[$arch] = $bucket[0]; continue }
-
-    $signature = ($bucket | Sort-Object FullName | ForEach-Object {
-      "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)"
-    }) -join ';'
-
-    if ($Script:ChosenWinISO[$arch] -and $Script:ChosenWinISOSignature[$arch] -eq $signature) {
-      $choice[$arch] = $Script:ChosenWinISO[$arch]
-      continue
-    }
-
-    $archLabel = if ($arch -eq 'arm64') { 'ARM64' } else { 'x64' }
-    $picked = Select-WindowsISO -Candidates $bucket -ArchLabel $archLabel
-    if ($picked) {
-      $Script:ChosenWinISO[$arch]          = $picked
-      $Script:ChosenWinISOSignature[$arch] = $signature
-      $choice[$arch] = $picked
-    } else {
-      # Cancelled - fall back to the previous default (first match) without
-      # caching, so the next probe (e.g. Refresh) asks again rather than
-      # silently locking in a choice the user explicitly declined to make.
-      $choice[$arch] = $bucket[0]
-    }
-  }
-  return $choice
-}
-
-# Which architecture the current build actually targets - mirrors the same
-# condition used everywhere else (-ARM64 switch, LP arch filter, etc.).
-function Get-ActiveWimWizardArch {
-  if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { return 'arm64' }
+function Get-WinISOArch {
+  param([string]$Name)
+  if ($Name -match 'arm64') { return 'arm64' }
   return 'x64'
 }
 
-# Full path of the specific Windows ISO the user picked via Select-WindowsISO
-# for the currently active architecture, or $null when there was no
-# ambiguity to resolve (single candidate - CLI auto-detection is unambiguous
-# and needs no override).
+# Release from the file name (e.g. _25H2.14_ / _26H2_ -> 25H2 / 26H2), LTSC,
+# or '' if the name doesn't say.
+function Get-WinISORelease {
+  param([string]$Name)
+  if ($Name -match '(?i)ltsc') { return 'LTSC' }
+  if ($Name -match '(?i)(?:^|[_\-\.])(\d{2}H[12])(?:[_\-\.]|$)') { return $Matches[1].ToUpper() }
+  return ''
+}
+
+# Fills the dropdown from the source folder when the set of ISOs changed.
+# Keeps the selected ISO (by file name), else the one saved in the registry,
+# else the most recently modified x64 ISO, else the most recent one.
+# Returns $true if the selected ISO changed.
+function Update-WinISOList {
+  if (-not $CmbWinISO) { return $false }
+  $folder = $TxtSource.Text.Trim()
+  $files  = @()
+  if ($folder -and $folder -notmatch '^\\\\' -and (Test-Path -LiteralPath $folder -PathType Container)) {
+    $files = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue | Where-Object {
+      $_.Extension -match '^\.iso$' -and $_.Name -notmatch '(?i)langpack|language.?pack|lang_pack|_lp_|inboxapps'
+    })
+  }
+  $sig = ($files | Sort-Object FullName | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" }) -join ';'
+  $before = if ($Script:SelectedWinISO) { $Script:SelectedWinISO.FullName } else { $null }
+  if ($sig -eq $Script:WinISOListSig) { return $false }
+  $Script:WinISOListSig = $sig
+
+  $sep   = ' ' + [char]0x00B7 + ' '
+  $items = @($files | ForEach-Object {
+    $rel = Get-WinISORelease $_.Name
+    $gb  = [math]::Round($_.Length / 1GB, 1)
+    $parts = @()
+    if ($rel) { $parts += $rel }
+    $parts += "$gb GB"
+    $parts += $_.LastWriteTime.ToString('yyyy-MM-dd')
+    [pscustomobject]@{ File = $_; Arch = (Get-WinISOArch $_.Name); Release = $rel; Simple = ($parts -join $sep); Name = $_.Name }
+  } | Sort-Object @{ e = { $_.Arch -eq 'arm64' } }, @{ e = { $_.Release }; Descending = $true }, @{ e = { $_.File.LastWriteTime }; Descending = $true })
+
+  # No automatic pick (2.17.1): the user chooses. Pre-selected only when it
+  # is still the user's own choice (current selection, or the one saved from
+  # the last session) or when there is exactly one ISO, so nothing to choose.
+  $keep = if ($Script:SelectedWinISO) { $Script:SelectedWinISO.Name } else { $Script:SavedWinISOName }
+  $sel  = -1
+  if ($keep) { for ($i = 0; $i -lt $items.Count; $i++) { if ($items[$i].File.Name -eq $keep) { $sel = $i; break } } }
+  if ($sel -lt 0 -and $items.Count -eq 1) { $sel = 0 }
+
+  # Open list as wide as the longest row (badge + description + file name),
+  # at least the closed box, at most the screen.
+  $need = $CmbWinISO.Width
+  foreach ($it in $items) {
+    $wDesc = [System.Windows.Forms.TextRenderer]::MeasureText([string]$it.Simple, $CmbWinISO.Font).Width
+    $wName = [System.Windows.Forms.TextRenderer]::MeasureText([string]$it.Name, $Script:WinISONameFont).Width
+    $need  = [math]::Max($need, 56 + $wDesc + 12 + $wName + 24)
+  }
+  $CmbWinISO.DropDownWidth = [int][math]::Min($need, [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Width - 40)
+
+  $Script:WinISOUpdating = $true
+  try {
+    $CmbWinISO.Items.Clear()
+    foreach ($it in $items) { [void]$CmbWinISO.Items.Add($it) }
+    $CmbWinISO.SelectedIndex = $sel
+  } finally { $Script:WinISOUpdating = $false }
+  $Script:SelectedWinISO = if ($sel -ge 0) { $items[$sel].File } else { $null }
+  $tip = if ($Script:SelectedWinISO) { $Script:SelectedWinISO.FullName } else { "Choose the Windows ISO to build from." }
+  $Script:WinISOTip.SetToolTip($CmbWinISO, $tip)
+
+  $after = if ($Script:SelectedWinISO) { $Script:SelectedWinISO.FullName } else { $null }
+  return ($before -ne $after)
+}
+
+# Architecture of the selected Windows ISO.
+function Get-ActiveWimWizardArch {
+  if ($Script:SelectedWinISO) { return (Get-WinISOArch $Script:SelectedWinISO.Name) }
+  return 'x64'
+}
+
+# Full path of the selected Windows ISO, or $null (no ISO in the folder, e.g.
+# an extracted install.wim - WimWizard.ps1 then auto-detects as before).
 function Get-ChosenWindowsISOPath {
-  $arch = Get-ActiveWimWizardArch
-  if ($Script:ChosenWinISO[$arch]) { return $Script:ChosenWinISO[$arch].FullName }
+  if ($Script:SelectedWinISO) { return $Script:SelectedWinISO.FullName }
   return $null
 }
 
 # Probe function - extracts build string from ISO, called at startup and on Refresh
 function Start-ISOProbe {
+  # Never re-probe during an application scan: the probe dismounts the ISO when
+  # it finishes, which would pull it out from under the scan. The controls that
+  # trigger a probe are disabled during a scan (Set-AppScanLock); this is the
+  # backstop for any other caller.
+  if ($Script:AppScan) { return }
+
   # Cancel any existing probe job
   if ($Script:ProbeJob) {
     try { Stop-Job $Script:ProbeJob -ErrorAction SilentlyContinue } catch {}
@@ -2157,28 +2314,37 @@ function Start-ISOProbe {
 
   $probeFolder = $TxtSource.Text
 
-  # Resolve (and, if needed, prompt for) which specific Windows ISO to use
-  # per architecture BEFORE showing the spinner - this is a modal dialog and
-  # should not appear to hang behind a spinning "probing..." indicator.
-  $isoChoice = Resolve-WindowsISOChoices -Folder $probeFolder
+  # Refresh the Windows ISO dropdown; the probe reads the selected ISO.
+  [void](Update-WinISOList)
 
   # Show "probing..." in preview while job runs, show spinner
   $Script:BuildString = '26200.xxxx'
   $Script:EditionTag  = '25H2'
   $Script:EditionIndexMap = @{}
+  $Script:IndexDetails    = $null
+  $Script:ProbeArchInfo   = $null
+  $Script:ArchInfoApplied = $null
   $CmbEdition.Items.Clear()
   $CmbEdition.Enabled = $false
-  $LblSpinner.Visible = $true
-  $Script:SpinnerTimer.Start()
   $BtnRun.Visible = $false
   $LblRunText.Visible = $false
+
+  # ISOs in the folder but none chosen yet: nothing is read until the user
+  # picks one in the Windows ISO dropdown (its SelectedIndexChanged probes).
+  # Run stays hidden because BuildString is the placeholder.
+  if ($CmbWinISO -and $CmbWinISO.Items.Count -gt 0 -and -not $Script:SelectedWinISO) {
+    $LblSpinner.Visible = $false
+    Update-UI
+    Update-AppListSource
+    return
+  }
+  $LblSpinner.Visible = $true
+  $Script:SpinnerTimer.Start()
   Update-UI
 
-  # The probe always reads build/edition off the x64 ISO (both architectures
-  # share the same build number) - see the "probe x64" comment inside the
-  # job below. Pass the resolved path through explicitly so the job doesn't
-  # need to (again) guess when more than one x64 candidate exists.
-  $probeChosenX64Path = if ($isoChoice.x64) { $isoChoice.x64.FullName } else { $null }
+  # The selected ISO, x64 or ARM64 (the parameter name predates the dropdown).
+  # $null only when the folder has no ISO (e.g. an extracted install.wim).
+  $probeChosenX64Path = Get-ChosenWindowsISOPath
   $Script:ProbeJob = Start-Job -ScriptBlock {
     param($Folder, $ChosenX64Path)
 
@@ -2201,12 +2367,31 @@ function Start-ISOProbe {
       }
     }
 
+    # Per-index WIM metadata for the Applications tab's app-list cache key
+    # (see Get-AppxCacheKey in the GUI). Everything is converted to strings
+    # here so the probe and the app scan job produce identical keys.
+    function Get-WimIndexDetails {
+      param([string]$WimPath)
+      foreach ($img in @(Get-WindowsImage -ImagePath $WimPath -ErrorAction SilentlyContinue)) {
+        $f = Get-WindowsImage -ImagePath $WimPath -Index $img.ImageIndex -ErrorAction SilentlyContinue
+        if (-not $f) { continue }
+        [pscustomobject]@{
+          Index        = [int]$img.ImageIndex
+          ImageName    = [string]$f.ImageName
+          EditionId    = [string]$f.EditionId
+          Architecture = [string]$f.Architecture
+          Version      = [string]$f.Version
+          SPBuild      = [string]$f.SPBuild
+          Languages    = ((@($f.Languages) | Sort-Object) -join ',')
+        }
+      }
+    }
+
     if (-not (Test-Path $Folder)) { return 'WIMWIZ:26200.xxxx|25H2' }
     $isoPath = $null
     try {
       if ($ChosenX64Path -and (Test-Path $ChosenX64Path)) {
-        # Caller (Resolve-WindowsISOChoices) already disambiguated - use it
-        # directly rather than re-scanning and re-guessing here.
+        # The ISO selected in the Windows ISO dropdown (x64 or ARM64).
         $probeISO = Get-Item -LiteralPath $ChosenX64Path -ErrorAction Stop
       } else {
         $winISOs = @(Get-ChildItem $Folder -ErrorAction SilentlyContinue |
@@ -2258,13 +2443,20 @@ function Start-ISOProbe {
       # above (fixes 24H2 ISOs being mislabeled 25H2 in the filename preview).
       $edition = Get-EditionFromBuild -BuildStr $build -IsLtsc $isLtsc
       [string]$indexList = ($allImages | ForEach-Object { "$($_.ImageIndex):$($_.ImageName)" }) -join '~'
+      $probeArch = if ($isoName -match 'arm64') { 'arm64' } else { 'x64' }
+      $idxDetail = @{}
+      [object[]]$probeImgs = @(Get-WimIndexDetails -WimPath $wim)
+      $idxDetail[$probeArch] = [pscustomobject]@{ IsoPath = $isoPath; Images = $probeImgs }
       Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null
+
+      Write-Output ('WIMWIZIDX:' + (ConvertTo-Json -InputObject $idxDetail -Depth 5 -Compress))
       return "WIMWIZ:$build|$edition|$indexList"
     } catch {
       if ($isoPath) { try { Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null } catch {} }
       return 'WIMWIZ:26200.xxxx|25H2'
     }
   } -ArgumentList $probeFolder, $probeChosenX64Path
+  Update-AppListSource
 
   $Script:ProbeTimer = New-Object System.Windows.Forms.Timer
   $Script:ProbeTimer.Interval = 1000
@@ -2280,41 +2472,48 @@ function Start-ISOProbe {
       $LblSpinner.Visible = $false
       $result = $rawResult | Where-Object { "$_" -match '^WIMWIZ:' } | Select-Object -Last 1
       $result = if ($result) { $result -replace '^WIMWIZ:', '' } else { '' }
+      $idxLine = $rawResult | Where-Object { "$_" -match '^WIMWIZIDX:' } | Select-Object -Last 1
+      foreach ($w in @($rawResult | Where-Object { "$_" -match '^WIMWIZWARN:' })) {
+        Write-Host "[WARN] ISO probe: $("$w" -replace '^WIMWIZWARN:', '')" -ForegroundColor Yellow
+      }
+      $Script:IndexDetails = $null
+      if ($idxLine) {
+        try { $Script:IndexDetails = ("$idxLine" -replace '^WIMWIZIDX:', '') | ConvertFrom-Json } catch { $Script:IndexDetails = $null }
+      }
       if ($result -and $result -match '^([\d\.x]+)\|([^\|]+)\|?(.*)$') {
         $buildPart   = $Matches[1]
         $editionPart = $Matches[2]
         $indexPart   = $Matches[3]
         if ($buildPart -match '^\d+\.\d+$') { $Script:BuildString = $buildPart }
         $Script:EditionTag = $editionPart
-        $CmbEdition.Items.Clear()
-        $Script:EditionIndexMap = @{}
-        if ($indexPart) {
-          foreach ($entry in ($indexPart -split '~')) {
-            if ($entry -match '^(\d+):(.+)$') {
-              $wimIdx  = [int]$Matches[1]
-              $wimName = [string]$Matches[2]
-              $CmbEdition.Items.Add($wimName) | Out-Null
-              $Script:EditionIndexMap[$CmbEdition.Items.Count - 1] = $wimIdx
-            }
-          }
-          $defaultIndex = -1
-          for ($i = 0; $i -lt $CmbEdition.Items.Count; $i++) {
-            $item = $CmbEdition.Items[$i]
-            if ($item -match 'Enterprise' -and $item -notmatch 'Evaluation') { $defaultIndex = $i; break }
-          }
-          if ($defaultIndex -lt 0 -and $CmbEdition.Items.Count -gt 0) { $defaultIndex = 0 }
-          $CmbEdition.SelectedIndex = $defaultIndex
-          $CmbEdition.Enabled = $true
-          $CmbEdition.Invalidate()
-          $CmbEdition.Refresh()
-          $PanelEdition.Invalidate()
-          $PanelEdition.Refresh()
-        } else {
-          $CmbEdition.Enabled = $false
+
+        # The result line describes the probed ISO: x64, unless the folder has
+        # only an ARM64 ISO (then the probe read that one and IndexDetails has
+        # only an arm64 entry). The other architecture comes from IndexDetails.
+        $probedArch = if ($Script:IndexDetails -and -not $Script:IndexDetails.x64 -and $Script:IndexDetails.arm64) { 'arm64' } else { 'x64' }
+        $probed = @{
+          Build      = if ($buildPart -match '^\d+\.\d+$') { $buildPart } else { $null }
+          EditionTag = $editionPart
+          Editions   = @()
+          IsoName    = if ($Script:IndexDetails -and $Script:IndexDetails.$probedArch) { Split-Path -Leaf ([string]$Script:IndexDetails.$probedArch.IsoPath) } else { '' }
         }
+        if ($indexPart) {
+          $probed.Editions = @(foreach ($entry in ($indexPart -split '~')) {
+            if ($entry -match '^(\d+):(.+)$') { @{ Index = [int]$Matches[1]; Name = [string]$Matches[2] } }
+          })
+        }
+        $Script:ProbeArchInfo = @{}
+        $Script:ProbeArchInfo[$probedArch] = $probed
+        $other = if ($probedArch -eq 'x64') { 'arm64' } else { 'x64' }
+        if ($Script:IndexDetails -and $Script:IndexDetails.$other) {
+          $oi = ConvertTo-ArchInfo $Script:IndexDetails.$other
+          if ($oi) { $Script:ProbeArchInfo[$other] = $oi }
+        }
+        Apply-ArchEditionInfo -Force
         Update-UI
       }
       Update-RunButton
+      Update-AppListSource
     }
   })
   $Script:ProbeTimer.Start()
@@ -2346,6 +2545,16 @@ $Script:IndLP       = New-ISOIndicator "Language Pack ISO"
 $Script:ISOStatusPanel.Controls.Add($Script:IndWin)
 $Script:ISOStatusPanel.Controls.Add($Script:IndLP)
 
+# The LP ISO is needed only for selected languages (unless skipped) or for
+# Features on Demand (their cabs come from the LP ISO even with -SkipLanguagePacks,
+# same rule as $needLPISO in WimWizard.ps1). With no languages and no FoDs the
+# engine only warns about a missing LP ISO and builds English-only.
+function Test-LPISONeeded {
+  $langs = $LangCheckboxes -and @($LangCheckboxes.Values | Where-Object { $_.Checked }).Count -gt 0
+  $fods  = $FoDCheckboxes  -and @($FoDCheckboxes.Values  | Where-Object { $_.Checked -and $_.Enabled }).Count -gt 0
+  return (($langs -and -not $ChkSkipLPs.Checked) -or $fods)
+}
+
 function Update-ISOStatus {
   # Guard - controls may not exist yet during initial form setup
   if (-not $Script:ISOStatusPanel -or -not $Script:IndWin) { return }
@@ -2362,8 +2571,8 @@ function Update-ISOStatus {
 
   $winFound      = $false
   $lpFound       = $false
-  $needsLP       = -not $ChkSkipLPs.Checked
-  $wantArm64LP   = $RadArm64 -and $RadArm64.Checked
+  $needsLP       = Test-LPISONeeded
+  $wantArm64LP   = (Get-ActiveWimWizardArch) -eq 'arm64'
 
   # UNC paths not supported - Mount-DiskImage requires a local path
   if ($folder -match '^\\\\') {
@@ -2371,6 +2580,7 @@ function Update-ISOStatus {
     $Script:IndWin.ForeColor = $ColRed
     $Script:IndWin.AutoSize  = $true
     $Script:IndLP.Text       = ""
+    Set-LPISOFound $false
     Update-ArchPanel
     return
   }
@@ -2394,6 +2604,7 @@ function Update-ISOStatus {
       $Script:IndWin.ForeColor = $ColRed
       $Script:IndLP.Text       = "Drive not accessible in elevated session - check mapping"
       $Script:IndLP.ForeColor  = $ColRed
+      Set-LPISOFound $false
       Update-ArchPanel
       return
     }
@@ -2411,6 +2622,8 @@ function Update-ISOStatus {
     $Script:IndWin.ForeColor = $ColRed
   }
 
+  Set-LPISOFound $lpFound
+
   # Language Pack ISO
   if ($lpFound) {
     $Script:IndLP.Text      = [char]0x2714 + " Language Pack ISO"
@@ -2427,6 +2640,9 @@ function Update-ISOStatus {
 # Show/hide Run button based on ISO status and probe completion
 function Update-RunButton {
   if (-not $Script:ISOStatusPanel -or -not $Script:IndWin -or -not $BtnRun) { return }
+  # No build while an application scan runs - the scan dismounts the ISO when
+  # it finishes (see Set-AppScanLock).
+  if ($Script:AppScan) { $BtnRun.Visible = $false; $LblRunText.Visible = $false; return }
   if ($ChkPatchMode -and $ChkPatchMode.Checked) {
     $BtnRun.Visible    = $true
     $LblRunText.Visible = $true
@@ -2450,35 +2666,180 @@ $PanelArch.Visible   = $false
 $TabOpts.Controls.Add($PanelArch)
 
 $LblArch = New-Object System.Windows.Forms.Label
-$LblArch.Text      = "Build architecture:"
+$LblArch.Text      = "Windows ISO:"
 $LblArch.Font      = $FontBold
 $LblArch.ForeColor = $ColFg
 $LblArch.Location  = New-Object System.Drawing.Point(0, 4)
 $LblArch.AutoSize  = $true
 $PanelArch.Controls.Add($LblArch)
 
-# Radio buttons - mutually exclusive, x64 default
-$RadX64 = New-Object System.Windows.Forms.RadioButton
-$RadX64.Text      = "x64"
-$RadX64.Checked   = $true
-$RadX64.ForeColor = $ColFg
-$RadX64.BackColor = [System.Drawing.Color]::Transparent
-$RadX64.Font      = $FontMain
-$RadX64.AutoSize  = $true
-$RadX64.Location  = New-Object System.Drawing.Point(135, 2)
-$RadX64.Add_CheckedChanged({ Update-UI })
-$PanelArch.Controls.Add($RadX64)
+# Owner-drawn: the closed box shows the architecture badge and the short
+# description (release, size, date); the open list shows the description and
+# then, on the same row, the ISO file name in a semibold, brighter font.
+# Item objects come from Update-WinISOList, which also sizes the open list.
+$CmbWinISO = New-Object System.Windows.Forms.ComboBox
+$CmbWinISO.Location      = New-Object System.Drawing.Point(135, 1)
+$CmbWinISO.Size          = New-Object System.Drawing.Size(380, 22)
+$CmbWinISO.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+$CmbWinISO.DrawMode      = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
+$CmbWinISO.ItemHeight    = 18
+$CmbWinISO.BackColor     = [System.Drawing.Color]::FromArgb(55, 55, 55)
+$CmbWinISO.ForeColor     = $ColFg
+$CmbWinISO.FlatStyle     = "Flat"
+$CmbWinISO.Font          = $FontMain
+$CmbWinISO.DropDownWidth = 380     # widened to fit the longest row in Update-WinISOList
+$PanelArch.Controls.Add($CmbWinISO)
+$Script:WinISOTip      = New-Object System.Windows.Forms.ToolTip
+$Script:WinISOBadge    = New-Object System.Drawing.Font('Segoe UI', 7.5, [System.Drawing.FontStyle]::Bold)
+$Script:WinISONameFont = New-Object System.Drawing.Font('Segoe UI Semibold', 9)
+$Script:WinISODescCol  = [System.Drawing.Color]::FromArgb(185, 185, 185)   # description line in the open list
+$CmbWinISO.Add_DrawItem({
+  param($s, $e)
+  $g    = $e.Graphics
+  $edit = ($e.State -band [System.Windows.Forms.DrawItemState]::ComboBoxEdit) -ne 0
+  $sel  = ($e.State -band [System.Windows.Forms.DrawItemState]::Selected) -ne 0
+  $dis  = ($e.State -band [System.Windows.Forms.DrawItemState]::Disabled) -ne 0
+  $bg   = if ($sel -and -not $edit) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { $s.BackColor }
+  $b    = New-Object System.Drawing.SolidBrush($bg)
+  $g.FillRectangle($b, $e.Bounds); $b.Dispose()
+  $left = [System.Windows.Forms.TextFormatFlags]::Left -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor
+          [System.Windows.Forms.TextFormatFlags]::SingleLine -bor [System.Windows.Forms.TextFormatFlags]::EndEllipsis -bor
+          [System.Windows.Forms.TextFormatFlags]::NoPrefix
 
-$RadArm64 = New-Object System.Windows.Forms.RadioButton
-$RadArm64.Text      = "ARM64"
-$RadArm64.Checked   = $false
-$RadArm64.ForeColor = $ColFg
-$RadArm64.BackColor = [System.Drawing.Color]::Transparent
-$RadArm64.Font      = $FontMain
-$RadArm64.AutoSize  = $true
-$RadArm64.Location  = New-Object System.Drawing.Point(195, 2)
-$RadArm64.Add_CheckedChanged({ Update-UI })
-$PanelArch.Controls.Add($RadArm64)
+  if ($e.Index -lt 0 -or $e.Index -ge $s.Items.Count) {
+    # Nothing selected yet (closed box)
+    $r = New-Object System.Drawing.Rectangle(($e.Bounds.X + 4), $e.Bounds.Y, ($e.Bounds.Width - 6), $e.Bounds.Height)
+    [System.Windows.Forms.TextRenderer]::DrawText($g, 'Choose a Windows ISO...', $s.Font, $r, $ColWarn, $left)
+    return
+  }
+  $it    = $s.Items[$e.Index]
+  $isArm = $it.Arch -eq 'arm64'
+  $badgeCol  = if ($isArm) { [System.Drawing.Color]::FromArgb(200, 95, 0) } else { [System.Drawing.Color]::FromArgb(0, 110, 200) }
+  $badgeText = if ($isArm) { 'ARM64' } else { 'x64' }
+  $badge = New-Object System.Drawing.Rectangle(($e.Bounds.X + 3), ($e.Bounds.Y + 2), 46, ($e.Bounds.Height - 4))
+  $bb = New-Object System.Drawing.SolidBrush($badgeCol)
+  $g.FillRectangle($bb, $badge); $bb.Dispose()
+  $center = [System.Windows.Forms.TextFormatFlags]::HorizontalCenter -bor [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor [System.Windows.Forms.TextFormatFlags]::SingleLine
+  [System.Windows.Forms.TextRenderer]::DrawText($g, $badgeText, $Script:WinISOBadge, $badge, [System.Drawing.Color]::White, $center)
+
+  $x = $e.Bounds.X + 56
+  $w = $e.Bounds.Width - 58
+  $descCol = if ($dis) { $ColSubtext } elseif ($edit) { $s.ForeColor } else { $Script:WinISODescCol }
+  $r1 = New-Object System.Drawing.Rectangle($x, $e.Bounds.Y, $w, $e.Bounds.Height)
+  [System.Windows.Forms.TextRenderer]::DrawText($g, [string]$it.Simple, $s.Font, $r1, $descCol, $left)
+  if (-not $edit) {
+    $sw = [System.Windows.Forms.TextRenderer]::MeasureText($g, [string]$it.Simple, $s.Font, $r1.Size, $left).Width
+    $x2 = $x + $sw + 12
+    $r2 = New-Object System.Drawing.Rectangle($x2, $e.Bounds.Y, [math]::Max(0, $e.Bounds.Right - $x2 - 2), $e.Bounds.Height)
+    [System.Windows.Forms.TextRenderer]::DrawText($g, [string]$it.Name, $Script:WinISONameFont, $r2, [System.Drawing.Color]::White, $left)
+  }
+})
+$CmbWinISO.Add_SelectedIndexChanged({
+  if ($Script:WinISOUpdating) { return }
+  $it  = $CmbWinISO.SelectedItem
+  $new = if ($it) { $it.File } else { $null }
+  if ($new -and $Script:SelectedWinISO -and $new.FullName -eq $Script:SelectedWinISO.FullName) { return }
+  $Script:SelectedWinISO = $new
+  if ($new) { $Script:WinISOTip.SetToolTip($CmbWinISO, $new.FullName) }
+  Update-FoDPanel
+  Start-ISOProbe   # edition list, build and app list follow the selected ISO
+  Update-UI
+})
+
+# ---- Per-architecture edition list, index map and build -------------------
+# Before 2.16.8 the edition list, the WIM index map (-WimIndex) and the build
+# used in the output file name all came from the x64 ISO, also when ARM64
+# was selected - on the assumption that both ISOs are the same release. With
+# e.g. a 26H2 x64 and a 25H2 ARM64 ISO that gave a wrong file name, and for
+# non-Enterprise editions a -WimIndex that could point at a different
+# edition (or nothing) in the ARM64 WIM. Now each architecture uses its own
+# WIM's data: x64 from the probe result line, ARM64 from the per-index
+# metadata the probe reads from the ARM64 ISO ($Script:IndexDetails.arm64).
+$Script:ProbeArchInfo   = $null   # @{ x64 = @{...}; arm64 = @{...} }
+$Script:ArchInfoApplied = $null   # arch whose info is currently in the UI
+$Script:ArchInfoMissing = $false  # selected arch could not be read; showing the other arch's data
+
+# GUI-side copy of Get-EditionFromBuild in the probe job.
+function Get-EditionTagFromBuild {
+  param([string]$BuildStr, [bool]$IsLtsc)
+  if ($IsLtsc) { return 'LTSC2024' }
+  $buildNum = 0
+  if ($BuildStr -match '^(\d+)') { $buildNum = [int]$Matches[1] }
+  switch ($true) {
+    ($buildNum -ge 26300)                          { return '26H2' }
+    ($buildNum -ge 26200 -and $buildNum -lt 26300) { return '25H2' }
+    ($buildNum -ge 26100 -and $buildNum -lt 26200) { return '24H2' }
+    ($buildNum -ge 22631 -and $buildNum -lt 26100) { return '23H2' }
+    default                                        { return '25H2' }
+  }
+}
+
+# Edition list, build and release tag for one architecture from the probe's
+# per-index metadata. Build is taken from the Enterprise index (like the
+# probe does for x64), else the first index.
+function ConvertTo-ArchInfo {
+  param($Set)
+  if (-not $Set -or @($Set.Images).Count -eq 0) { return $null }
+  $imgs = @($Set.Images | Sort-Object { [int]$_.Index })
+  $ref  = $imgs | Where-Object { $_.ImageName -match 'Enterprise' -and $_.ImageName -notmatch 'Evaluation' } | Select-Object -First 1
+  if (-not $ref) { $ref = $imgs[0] }
+  $build = if ([string]$ref.Version -match '^\d+\.\d+\.(\d+\.\d+)') { $Matches[1] } else { $null }
+  $ltsc  = [string]$Set.IsoPath -match 'ltsc'
+  return @{
+    Build      = $build
+    EditionTag = Get-EditionTagFromBuild -BuildStr $build -IsLtsc $ltsc
+    Editions   = @($imgs | ForEach-Object { @{ Index = [int]$_.Index; Name = [string]$_.ImageName } })
+    IsoName    = Split-Path -Leaf ([string]$Set.IsoPath)
+  }
+}
+
+# Puts the active architecture's edition list, index map, build and release
+# tag into the UI. Keeps the selected edition by name when the new list has
+# it, else selects Enterprise like the probe does. No-op if that arch is
+# already applied (both radio buttons fire on a switch) unless -Force.
+function Apply-ArchEditionInfo {
+  param([switch]$Force)
+  if (-not $Script:ProbeArchInfo -or -not $CmbEdition) { return }
+  $arch = Get-ActiveWimWizardArch
+  if (-not $Force -and $Script:ArchInfoApplied -eq $arch) { return }
+  $info = $Script:ProbeArchInfo[$arch]
+  $Script:ArchInfoMissing = $false
+  if (-not $info) {
+    # Selected arch could not be read: fall back to the other arch's data
+    # (the pre-2.16.8 behaviour).
+    $info = if ($Script:ProbeArchInfo['x64']) { $Script:ProbeArchInfo['x64'] } else { $Script:ProbeArchInfo['arm64'] }
+    $Script:ArchInfoMissing = $true
+  }
+  $Script:ArchInfoApplied = $arch
+  if (-not $info) { return }
+
+  $prevName = [string]$CmbEdition.SelectedItem
+  if ($info.Build -and $info.Build -match '^\d+\.\d+$') { $Script:BuildString = $info.Build }
+  if ($info.EditionTag) { $Script:EditionTag = $info.EditionTag }
+  $CmbEdition.Items.Clear()
+  $Script:EditionIndexMap = @{}
+  foreach ($e in @($info.Editions)) {
+    $CmbEdition.Items.Add([string]$e.Name) | Out-Null
+    $Script:EditionIndexMap[$CmbEdition.Items.Count - 1] = [int]$e.Index
+  }
+  if ($CmbEdition.Items.Count -gt 0) {
+    $sel = -1
+    if ($prevName) { $sel = $CmbEdition.Items.IndexOf($prevName) }
+    if ($sel -lt 0) {
+      for ($i = 0; $i -lt $CmbEdition.Items.Count; $i++) {
+        $item = $CmbEdition.Items[$i]
+        if ($item -match 'Enterprise' -and $item -notmatch 'Evaluation') { $sel = $i; break }
+      }
+    }
+    if ($sel -lt 0) { $sel = 0 }
+    $CmbEdition.SelectedIndex = $sel
+    $CmbEdition.Enabled = -not $Script:AppScan
+    $CmbEdition.Invalidate(); $CmbEdition.Refresh()
+    if ($PanelEdition) { $PanelEdition.Invalidate(); $PanelEdition.Refresh() }
+  } else {
+    $CmbEdition.Enabled = $false
+  }
+}
 
 function Update-ArchPanel {
   $folder = $TxtSource.Text.Trim()
@@ -2493,16 +2854,18 @@ function Update-ArchPanel {
       elseif ($n -match 'win_pro_11|win.*11.*ent|win.*11.*business|win.*ltsc|insiderpreview') { $Script:HasX64 = $true }
     }
   }
-  $both = $Script:HasX64 -and $Script:HasArm64
-  $PanelArch.Visible = $both
-  if (-not $both) {
-    $RadX64.Checked = $true   # reset to x64 when panel hides
-    if ($ChkSkipLPs) { $ChkSkipLPs.Enabled = $true }
-  }
-  # Re-enable LP checkbox when arch changes (no longer force-locked for ARM64)
+  # ISOs added/removed without a Refresh: refill the dropdown, and re-probe
+  # (deferred - we are inside Update-UI here) if the selected ISO changed.
+  $changed = Update-WinISOList
+  $PanelArch.Visible = $CmbWinISO.Items.Count -gt 0
   if ($ChkSkipLPs) { $ChkSkipLPs.Enabled = $true }
-  # Update FoD availability for selected architecture
-  if ($PanelArch -and $PanelArch.Visible -ne $null) { Update-FoDPanel }
+  Update-FoDPanel
+  if ($changed -and -not $Script:ProbeJob -and -not $Script:AppScan) {
+    $t = New-Object System.Windows.Forms.Timer
+    $t.Interval = 50
+    $t.Add_Tick({ param($s, $e) $s.Stop(); $s.Dispose(); Start-ISOProbe; Update-UI })
+    $t.Start()
+  }
 }
 
 # Edition / WIM index selector
@@ -2530,7 +2893,7 @@ $CmbEdition.BackColor     = [System.Drawing.Color]::FromArgb(55, 55, 55)
 $CmbEdition.ForeColor     = $ColFg
 $CmbEdition.FlatStyle     = "Flat"
 $CmbEdition.Enabled       = $false
-$CmbEdition.Add_SelectedIndexChanged({ Update-UI; Update-SCCMPreview })
+$CmbEdition.Add_SelectedIndexChanged({ Update-UI; Update-SCCMPreview; Update-AppListSource })
 $PanelEdition.Controls.Add($CmbEdition)
 
 # Output filename
@@ -2769,39 +3132,719 @@ $BtnCheckDefault.ForeColor = $ColFg
 $BtnCheckDefault.FlatStyle = "Flat"
 $BtnCheckDefault.Font    = $FontSmall
 $TabApps.Controls.Add($BtnCheckDefault)
+
+# Build application list - mounts the selected image index read-only and reads
+# its provisioned Appx packages, so the list below shows what is actually in
+# that image instead of the built-in catalog. One scan per image: results are
+# cached in %ProgramData%\WimWizard\appx-cache.json, keyed on EditionId,
+# Architecture, Version, SPBuild and Languages of the WIM index (read from the
+# WIM metadata during Start-ISOProbe, no mount needed for the lookup).
+$BtnBuildAppList = New-Object System.Windows.Forms.Button
+$BtnBuildAppList.Text      = "Build application list"
+$BtnBuildAppList.Location  = New-Object System.Drawing.Point(312, 32)
+$BtnBuildAppList.Size      = New-Object System.Drawing.Size(160, 24)
+$BtnBuildAppList.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$BtnBuildAppList.ForeColor = $ColFg
+$BtnBuildAppList.FlatStyle = "Flat"
+$BtnBuildAppList.Font      = $FontSmall
+$TabApps.Controls.Add($BtnBuildAppList)
+
+# "Disabled" without Enabled = $false: WinForms draws disabled button text in
+# the system's dark grey, which is nearly unreadable on this dark button
+# ("Dismounting image..." in 2.16.4). The button stays enabled; this sets a
+# flag the click handler checks, a light grey text colour, and hover/press
+# colours equal to the background so it doesn't react to the mouse.
+function Set-BuildAppListEnabled {
+  param([bool]$On)
+  $Script:BuildAppListEnabled = $On
+  $bg = [System.Drawing.Color]::FromArgb(60, 60, 60)
+  if ($On) {
+    $BtnBuildAppList.ForeColor = $ColFg
+    $BtnBuildAppList.Cursor    = [System.Windows.Forms.Cursors]::Hand
+    $BtnBuildAppList.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+    $BtnBuildAppList.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(95, 95, 95)
+  } else {
+    $BtnBuildAppList.ForeColor = $ColSubtext
+    $BtnBuildAppList.Cursor    = [System.Windows.Forms.Cursors]::Default
+    $BtnBuildAppList.FlatAppearance.MouseOverBackColor = $bg
+    $BtnBuildAppList.FlatAppearance.MouseDownBackColor = $bg
+  }
+}
+Set-BuildAppListEnabled $false
+
+# The Segoe UI 8 text sat ~1 px high in these 24 px flat buttons (measured on
+# a screenshot: 6 px above the glyphs, 8 px below). A 2 px top padding moves
+# the centred text down 1 px.
+foreach ($b in @($BtnCheckAll, $BtnUncheckAll, $BtnCheckDefault, $BtnBuildAppList)) {
+  $b.Padding = New-Object System.Windows.Forms.Padding(0, 2, 0, 0)
+}
+
+# Typical scan duration, shown in the (i) tooltip and the scan status line.
+# Observed on 26H2 Enterprise scans (2026-11-03); depends on disk speed.
+$Script:AppScanTypicalText = '200-300 s'
+
+# (i) after "Build application list" - hover explains what the scan does
+$LblBuildAppListInfo = New-Object System.Windows.Forms.Label
+$LblBuildAppListInfo.Text      = [char]0x24D8   # circled latin small letter i
+$LblBuildAppListInfo.Font      = New-Object System.Drawing.Font('Segoe UI Symbol', 10)
+$LblBuildAppListInfo.ForeColor = $ColFg
+$LblBuildAppListInfo.BackColor = [System.Drawing.Color]::Transparent
+$LblBuildAppListInfo.AutoSize  = $true
+$LblBuildAppListInfo.Cursor    = [System.Windows.Forms.Cursors]::Help
+$LblBuildAppListInfo.Location  = New-Object System.Drawing.Point(($BtnBuildAppList.Right + 4), 33)
+$TabApps.Controls.Add($LblBuildAppListInfo)
+$Script:BuildAppListInfoTip = New-Object System.Windows.Forms.ToolTip
+$Script:BuildAppListInfoTip.AutoPopDelay = 20000
+$Script:BuildAppListInfoTip.SetToolTip($LblBuildAppListInfo,
+  "Reads which apps are actually provisioned in the image edition selected on the`r`n" +
+  "Options tab, and shows those instead of WimWizard's built-in list.`r`n`r`n" +
+  "The image is mounted read-only in a background process - it is not changed.`r`n" +
+  "Usually takes $($Script:AppScanTypicalText) (3-5 minutes; depends on disk speed).`r`n" +
+  "The list appears as soon as the apps are read; the image is then dismounted in`r`n" +
+  "the background and Run is available again when that finishes.`r`n`r`n" +
+  "Needed once per image: the result is saved and reused for the same edition,`r`n" +
+  "architecture, build and languages. A new ISO build is scanned again.`r`n" +
+  "Requires Administrator.")
+
+$LblAppListStatus = New-Object System.Windows.Forms.Label
+$LblAppListStatus.Text         = ""
+$LblAppListStatus.Font         = $FontSmall
+$LblAppListStatus.ForeColor    = $ColSubtext
+$LblAppListStatus.Location     = New-Object System.Drawing.Point(6, 62)
+$LblAppListStatus.Size         = New-Object System.Drawing.Size(716, 16)
+$LblAppListStatus.AutoEllipsis = $true
+$TabApps.Controls.Add($LblAppListStatus)
+
 $AppPanel  = New-Object System.Windows.Forms.Panel
-$AppPanel.Location  = New-Object System.Drawing.Point(4, 64)
-$AppPanel.Size  = New-Object System.Drawing.Size(720, 340)
+$AppPanel.Location   = New-Object System.Drawing.Point(4, 84)
+$AppPanel.Size       = New-Object System.Drawing.Size(720, 360)
 $AppPanel.BackColor  = [System.Drawing.Color]::Transparent
+$AppPanel.AutoScroll = $true
 $TabApps.Controls.Add($AppPanel)
 
 $AppCheckboxes  = @{}
-$appKeys = @($AppxData.Keys)
-$appRows = [math]::Ceiling($appKeys.Count / 3)
-$col = 0; $row = 0
+$Script:AppToolTip       = New-Object System.Windows.Forms.ToolTip
+$Script:AppListKey       = $null   # 'builtin' or the cache key the panel currently shows
+$Script:AppListHidden    = 0       # protected packages left out of the current scanned list
+$Script:AppListBuilding  = $false  # suppresses AppChoice updates while checkboxes are (re)created
+$Script:IndexDetails     = $null   # per-arch WIM index metadata from Start-ISOProbe
+$Script:AppxSessionCache = @{}     # scans from this session (used if the cache file can't be written)
+$Script:AppxCachePath       = Join-Path $env:ProgramData 'WimWizard\appx-cache.json'
+$Script:AppxKnownImagesPath = Join-Path $ScriptRoot 'WimWizard-KnownImages.json'
 
-foreach ($pkg in $appKeys) {
-  $entry = $AppxData[$pkg]
-  $cb  = New-DarkCheckbox -Text $entry.Name -Checked ([bool]$entry.Default)
-  $cb.Location = New-Object System.Drawing.Point(($col * $colW + 4), ($row * $rowH + 2))
-  $cb.Width  = $colW - 8
-  $cb.AutoSize = $false
-  $cb.Tag  = $pkg
-  $AppPanel.Controls.Add($cb)
-  $AppCheckboxes[$pkg] = $cb
-  $row++
-  if ($row -ge $appRows) { $row = 0; $col++ }
+# The user's selection per package key, independent of which checkboxes are
+# currently shown. Switching between images (or between the built-in and a
+# scanned list) rebuilds the checkboxes; this keeps choices for apps that are
+# not in the current image so they come back when an image that has them is
+# selected. Saved to the registry (Apps) instead of the visible checkboxes.
+$Script:AppChoice = @{}
+foreach ($k in $AppxData.Keys) { $Script:AppChoice[[string]$k] = [bool]$AppxData[$k].Default }
+
+# Saved keys from versions before 2.16.0 that were renamed. MicrosoftTeams is
+# deliberately NOT mapped to MSTeams: the old entry meant the personal-only
+# client, and carrying a saved "remove" over to the unified Teams client would
+# be a change the user never made.
+$Script:AppKeyRenames = @{ 'DevHome_8wekyb3d8bbwe' = 'Microsoft.Windows.DevHome' }
+
+function Get-AppDefault {
+  param([string]$Pkg)
+  if ($AppxData.Contains($Pkg)) { return [bool]$AppxData[$Pkg].Default }
+  return $false
 }
 
+function Get-SelectedAppKeys {
+  return @($Script:AppChoice.GetEnumerator() | Where-Object { $_.Value } | ForEach-Object { $_.Key } | Sort-Object)
+}
+
+# (Re)creates the checkboxes. $Entry = $null shows the built-in catalog;
+# otherwise $Entry is a cache entry and its .Packages are shown, minus the
+# protected packages, with friendly names from the catalog where known and
+# the raw DisplayName otherwise (tooltip always shows the package name).
+function Build-AppCheckboxes {
+  param($Entry)
+  $Script:AppListBuilding = $true
+  $AppPanel.SuspendLayout()
+  try {
+    foreach ($c in @($AppPanel.Controls)) { $AppPanel.Controls.Remove($c); $c.Dispose() }
+    $AppCheckboxes.Clear()
+    $Script:AppListHidden = 0
+    $items = @()
+    if ($null -eq $Entry) {
+      foreach ($pkg in $AppxData.Keys) { $items += [pscustomobject]@{ Pkg = [string]$pkg; Label = [string]$AppxData[$pkg].Name } }
+    } else {
+      $pk = $Entry.Packages
+      # Windows PowerShell 5.1 can serialize a PSObject-wrapped array as
+      # {"value":[...],"Count":n}; accept that shape too if a file has it.
+      if ($pk -and -not ($pk -is [array]) -and $pk.PSObject.Properties['value'] -and $pk.PSObject.Properties['Count']) { $pk = $pk.value }
+      $names = @($pk | ForEach-Object { [string]$_.DisplayName } | Where-Object { $_ } | Sort-Object -Unique)
+      foreach ($n in $names) {
+        if ($Script:AppxProtected -contains $n) { $Script:AppListHidden++; continue }
+        $label = if ($AppxData.Contains($n)) { [string]$AppxData[$n].Name } else { $n }
+        $items += [pscustomobject]@{ Pkg = $n; Label = $label }
+      }
+      $items = @($items | Sort-Object Label)
+    }
+    $rows = [int][math]::Max(1, [math]::Ceiling($items.Count / 3))
+    $cw = 232   # 3 x 232 leaves room for the vertical scroll bar inside the 720 px panel
+    $rh = 22
+    for ($i = 0; $i -lt $items.Count; $i++) {
+      $it  = $items[$i]
+      $col = [int][math]::Floor($i / $rows)
+      $row = $i % $rows
+      if (-not $Script:AppChoice.ContainsKey($it.Pkg)) { $Script:AppChoice[$it.Pkg] = Get-AppDefault $it.Pkg }
+      $cb = New-DarkCheckbox -Text $it.Label -Checked ([bool]$Script:AppChoice[$it.Pkg])
+      $cb.Location     = New-Object System.Drawing.Point(($col * $cw + 4), ($row * $rh + 2))
+      $cb.Width        = $cw - 8
+      $cb.AutoSize     = $false
+      $cb.AutoEllipsis = $true
+      $cb.Tag          = $it.Pkg
+      $Script:AppToolTip.SetToolTip($cb, $it.Pkg)
+      $cb.Add_CheckedChanged({
+        param($s, $e)
+        # While "Skip Appx removal" is checked the boxes are forced off; that
+        # is not a user choice and must not overwrite AppChoice.
+        if ($Script:AppListBuilding -or $ChkSkipAppx.Checked) { return }
+        $Script:AppChoice[[string]$s.Tag] = $s.Checked
+      })
+      if ($ChkSkipAppx.Checked) { $cb.Checked = $false; $cb.Enabled = $false; $cb.ForeColor = $ColSubtext }
+      $AppPanel.Controls.Add($cb)
+      $AppCheckboxes[$it.Pkg] = $cb
+    }
+  } finally {
+    $AppPanel.ResumeLayout()
+    $Script:AppListBuilding = $false
+  }
+}
+
+function Set-AppCheckboxesFromChoice {
+  if ($ChkSkipAppx.Checked) { return }
+  $Script:AppListBuilding = $true
+  try {
+    foreach ($kvp in @($AppCheckboxes.GetEnumerator())) { $kvp.Value.Checked = [bool]$Script:AppChoice[$kvp.Key] }
+  } finally { $Script:AppListBuilding = $false }
+}
+
+# Cache key for one WIM index. Every field comes from Get-WindowsImage -Index
+# (WIM metadata) and is converted to a string inside the job that read it, so
+# the probe and the scan produce identical keys for the same index.
+function Get-AppxCacheKey {
+  param($Details)
+  return ('{0}|{1}|{2}|{3}|{4}' -f $Details.EditionId, $Details.Architecture, $Details.Version, $Details.SPBuild, $Details.Languages)
+}
+
+# Merged view: shipped known-images file (optional, next to the script), then
+# the local cache, then scans from this session. Later sources win.
+function Read-AppxCache {
+  $result = @{}
+  foreach ($path in @($Script:AppxKnownImagesPath, $Script:AppxCachePath)) {
+    if (-not (Test-Path -LiteralPath $path)) { continue }
+    try {
+      $doc = Get-Content -LiteralPath $path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+      if ($doc -and $doc.Images) {
+        foreach ($p in $doc.Images.PSObject.Properties) { $result[$p.Name] = $p.Value }
+      }
+    } catch {
+      Write-Host "[WARN] Could not read app list cache $path : $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+  }
+  foreach ($k in $Script:AppxSessionCache.Keys) { $result[$k] = $Script:AppxSessionCache[$k] }
+  return $result
+}
+
+# Adds or replaces one entry in the local cache file. Throws if the existing
+# file can't be parsed - it is never overwritten with only the new entry.
+function Save-AppxCacheEntry {
+  param([string]$Key, $Entry)
+  $path = $Script:AppxCachePath
+  $dir  = Split-Path -Parent $path
+  if (-not (Test-Path -LiteralPath $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
+  $images = [ordered]@{}
+  if (Test-Path -LiteralPath $path) {
+    $existing = Get-Content -LiteralPath $path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+    if ($existing -and $existing.Images) {
+      foreach ($p in $existing.Images.PSObject.Properties) { $images[$p.Name] = $p.Value }
+    }
+  }
+  $images[$Key] = $Entry
+  $doc  = [ordered]@{ SchemaVersion = 1; Images = $images }
+  $json = ConvertTo-Json -InputObject $doc -Depth 8
+  $tmp  = "$path.tmp"
+  [System.IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
+  Move-Item -LiteralPath $tmp -Destination $path -Force
+}
+
+# Metadata for the edition selected in the Options tab, for the active
+# architecture, or $null if the probe hasn't delivered it.
+function Get-SelectedImageDetails {
+  if (-not $Script:IndexDetails -or -not $CmbEdition) { return $null }
+  $pos = $CmbEdition.SelectedIndex
+  if ($pos -lt 0 -or -not $Script:EditionIndexMap.ContainsKey($pos)) { return $null }
+  $idx  = [int]$Script:EditionIndexMap[$pos]
+  $arch = Get-ActiveWimWizardArch
+  $set  = $Script:IndexDetails.$arch
+  if (-not $set) { return $null }
+  # The edition list and index map come from the x64 WIM. Match the other
+  # architecture's WIM by edition name first - its index numbering is not
+  # guaranteed to be the same - and fall back to the index number.
+  $name = [string]$CmbEdition.SelectedItem
+  $img = @($set.Images) | Where-Object { [string]$_.ImageName -eq $name } | Select-Object -First 1
+  if (-not $img) { $img = @($set.Images) | Where-Object { [int]$_.Index -eq $idx } | Select-Object -First 1 }
+  if (-not $img) { return $null }
+  return [pscustomobject]@{
+    IsoPath      = [string]$set.IsoPath
+    Arch         = $arch
+    Index        = [int]$img.Index
+    ImageName    = [string]$img.ImageName
+    EditionId    = [string]$img.EditionId
+    Architecture = [string]$img.Architecture
+    Version      = [string]$img.Version
+    SPBuild      = [string]$img.SPBuild
+    Languages    = [string]$img.Languages
+  }
+}
+
+function Set-AppListStatus {
+  param([string]$Text, [System.Drawing.Color]$Color)
+  $LblAppListStatus.Text      = $Text
+  $LblAppListStatus.ForeColor = $Color
+  $Script:AppToolTip.SetToolTip($LblAppListStatus, $Text)
+}
+
+# Picks the list to show for the selected image (cached scan or built-in
+# catalog), rebuilds the checkboxes only when that changes, and updates the
+# status line and button. Called on edition/arch change, after the probe and
+# after a scan.
+function Update-AppListSource {
+  if (-not $LblAppListStatus) { return }
+  # The scan timer owns the status line until the package list is in; during
+  # the background dismount that follows, the list is shown normally.
+  if ($Script:AppScan -and -not $Script:AppScan.ListDone) { return }
+
+  $d     = Get-SelectedImageDetails
+  $entry = $null
+  if ($d) {
+    $key   = Get-AppxCacheKey $d
+    $cache = Read-AppxCache
+    if ($cache.ContainsKey($key)) { $entry = $cache[$key] }
+  }
+  $wantKey = if ($entry) { $key } else { 'builtin' }
+  if ($wantKey -ne $Script:AppListKey) {
+    Build-AppCheckboxes -Entry $entry
+    $Script:AppListKey = $wantKey
+  }
+
+  $ColOk = [System.Drawing.Color]::FromArgb(0, 200, 80)
+  if ($Script:ProbeJob) {
+    Set-AppListStatus "Reading the Windows ISO - the list can be checked against the image once the edition is known." $ColSubtext
+  } elseif (-not $d) {
+    $arch = Get-ActiveWimWizardArch
+    if ($Script:IndexDetails -and $CmbEdition.SelectedIndex -ge 0 -and -not $Script:IndexDetails.$arch) {
+      Set-AppListStatus "The $arch image could not be read during the ISO probe (see the console window) - click Refresh on the Options tab." $ColWarn
+    } elseif ($Script:IndexDetails -and $CmbEdition.SelectedIndex -ge 0) {
+      Set-AppListStatus "The selected edition was not found in the $arch image - showing the built-in list." $ColWarn
+    } else {
+      Set-AppListStatus "No image edition selected - showing the built-in list (not checked against an image)." $ColSubtext
+    }
+  } elseif ($entry) {
+    $txt = "Verified for {0} ({1}, {2}) - scanned {3}. {4} system packages hidden." -f $d.ImageName, $d.Arch, $d.Version, $entry.ScannedAt, $Script:AppListHidden
+    Set-AppListStatus $txt $ColOk
+  } else {
+    $txt = "Not verified for {0} ({1}, {2}) - showing the built-in list. Click ""Build application list"" to read the apps from this image." -f $d.ImageName, $d.Arch, $d.Version
+    Set-AppListStatus $txt $ColWarn
+  }
+  # During the background dismount the (disabled) button says so - the status
+  # line has no room left for it.
+  $BtnBuildAppList.Text    = if ($Script:AppScan) { "Dismounting image..." } elseif ($entry) { "Rebuild application list" } else { "Build application list" }
+  Set-BuildAppListEnabled ([bool]$d -and -not $Script:ProbeJob -and -not $Script:AppScan -and $Script:IsElevated)
+  if ($d -and -not $Script:IsElevated) {
+    Set-AppListStatus ($LblAppListStatus.Text + "  Scanning requires Administrator.") $LblAppListStatus.ForeColor
+  }
+}
+
+# Locks the controls that would change the image or remount/dismount the ISO
+# while a scan runs: the probe dismounts the ISO when it finishes, and a build
+# started mid-scan would lose its ISO when the scan dismounts it.
+function Set-AppScanLock {
+  param([bool]$On)
+  $en = -not $On
+  foreach ($c in @($TxtSource, $BtnBrowseSrc, $BtnRefreshSrc, $CmbWinISO, $ChkPatchMode)) { if ($c) { $c.Enabled = $en } }
+  if ($CmbEdition) { $CmbEdition.Enabled = $en -and $CmbEdition.Items.Count -gt 0 }
+  Set-BuildAppListEnabled $en
+  Update-RunButton
+  # Spinner in place of Run for the whole scan, until the process exits after
+  # the background dismount. Start-ISOProbe owns it otherwise; the two never
+  # overlap (Start-AppScan and Start-ISOProbe each refuse while the other runs).
+  if ($LblSpinner -and $Script:SpinnerTimer) {
+    $LblSpinner.Visible = $On
+    if ($On) { $Script:SpinnerTimer.Start() } else { $Script:SpinnerTimer.Stop() }
+  }
+}
+
+# The scan runs as a separate hidden Windows PowerShell process (the same way
+# builds run), not as a Start-Job. In 2.16.0 the Start-Job version failed with
+# "Class not registered" (0x80040154) on a real 26H2 image while the build
+# process reads the same packages fine. Confirmed 2026-11-03 against a mounted
+# 26H2 index: Get-AppxProvisionedPackage -Path returned 47 packages directly
+# and threw "Class not registered" inside Start-Job (other DISM cmdlets, e.g.
+# Get-WindowsImage in the ISO probe job, work in a job). A separate process
+# also survives the GUI being closed, so it always dismounts what it mounted.
+#
+# Protocol: the process appends STEP/WARN/ERROR/LISTDONE/DONE lines to
+# -LogPath, writes the package list to -ResultPath (via .tmp + rename, so the
+# GUI never reads a partial file) as soon as it has it, and only then
+# dismounts. -LockPath holds its PID while it runs, so a GUI started during a
+# background dismount knows not to touch the ISO.
+$Script:AppScanScript = @'
+param(
+  [string]$IsoPath, [int]$Index, [string]$MountRoot,
+  [string]$LogPath, [string]$ResultPath, [string]$LockPath
+)
+$ErrorActionPreference = 'Stop'
+function Write-ScanLog([string]$Kind, [string]$Text) {
+  [System.IO.File]::AppendAllText($LogPath, ("{0}|{1}|{2}`r`n" -f $Kind, (Get-Date -Format 'HH:mm:ss'), $Text))
+}
+[System.IO.File]::WriteAllText($LockPath, [string]$PID)
+$weMountedIso = $false
+$mountDir     = $null
+$wimMounted   = $false
+$step         = 'Starting'
+try {
+  $step = 'Removing leftover scan mounts'
+  Write-ScanLog 'STEP' $step
+  foreach ($m in @(Get-WindowsImage -Mounted -ErrorAction SilentlyContinue)) {
+    if ([string]$m.Path -like '*\WimWizard-AppScan-*') {
+      try { Dismount-WindowsImage -Path $m.Path -Discard -ErrorAction Stop | Out-Null } catch {}
+      try { [System.IO.Directory]::Delete([string]$m.Path) } catch {}
+    }
+  }
+
+  $step = 'Mounting the ISO'
+  Write-ScanLog 'STEP' $step
+  $di = Get-DiskImage -ImagePath $IsoPath
+  if (-not $di.Attached) {
+    Mount-DiskImage -ImagePath $IsoPath | Out-Null
+    $weMountedIso = $true
+    $di = Get-DiskImage -ImagePath $IsoPath
+  }
+  # The drive letter can lag behind Mount-DiskImage - wait up to 5 s.
+  [string]$letter = ''
+  for ($w = 0; $w -lt 10 -and -not $letter; $w++) {
+    [string]$letter = (Get-DiskImage -ImagePath $IsoPath | Get-Volume -ErrorAction SilentlyContinue).DriveLetter
+    if (-not $letter) { Start-Sleep -Milliseconds 500 }
+  }
+  if (-not $letter) { throw "The ISO was mounted but has no drive letter." }
+  [string]$wim = Join-Path ($letter + ':\') 'sources\install.wim'
+  if (-not (Test-Path -LiteralPath $wim)) {
+    if (Test-Path -LiteralPath (Join-Path ($letter + ':\') 'sources\install.esd')) {
+      throw "This ISO contains install.esd, which can't be mounted for scanning. Export the index to a WIM first."
+    }
+    throw "sources\install.wim was not found on the ISO."
+  }
+
+  $step = 'Reading image metadata'
+  Write-ScanLog 'STEP' $step
+  $info = Get-WindowsImage -ImagePath $wim -Index $Index
+
+  $step = 'Mounting the image (read-only)'
+  Write-ScanLog 'STEP' $step
+  $mountDir = Join-Path $MountRoot ('WimWizard-AppScan-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  New-Item -Path $mountDir -ItemType Directory -Force | Out-Null
+  Mount-WindowsImage -ImagePath $wim -Index $Index -Path $mountDir -ReadOnly | Out-Null
+  $wimMounted = $true
+
+  $step = 'Reading provisioned packages'
+  Write-ScanLog 'STEP' $step
+  $method = 'Get-AppxProvisionedPackage'
+  try {
+    [object[]]$pkgs = @(Get-AppxProvisionedPackage -Path $mountDir | ForEach-Object {
+      [pscustomobject]@{ DisplayName = [string]$_.DisplayName; PackageName = [string]$_.PackageName }
+    })
+  } catch {
+    Write-ScanLog 'WARN' ("Get-AppxProvisionedPackage failed: {0} (HRESULT 0x{1:X8}) - using dism.exe instead" -f $_.Exception.Message, $_.Exception.HResult)
+    $method = 'dism.exe'
+    $dism = Join-Path $env:SystemRoot 'System32\dism.exe'
+    # 'Continue' around the native call: with 'Stop', Windows PowerShell 5.1
+    # turns any stderr line from 2>&1 into a terminating error.
+    $ErrorActionPreference = 'Continue'
+    $out  = @(& $dism /English "/Image:$mountDir" /Get-ProvisionedAppxPackages 2>&1 | ForEach-Object { [string]$_ })
+    $dismExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($dismExit -ne 0) {
+      throw ("dism.exe /Get-ProvisionedAppxPackages failed (exit code {0}): {1}" -f $dismExit, (($out | Where-Object { $_.Trim() } | Select-Object -Last 3) -join ' '))
+    }
+    $list = New-Object System.Collections.ArrayList
+    $cur  = $null
+    foreach ($line in $out) {
+      if ($line -match '^\s*DisplayName\s*:\s*(.+?)\s*$') {
+        if ($cur) { [void]$list.Add($cur) }
+        $cur = [pscustomobject]@{ DisplayName = $Matches[1]; PackageName = '' }
+      } elseif ($cur -and $line -match '^\s*PackageName\s*:\s*(.+?)\s*$') {
+        $cur.PackageName = $Matches[1]
+      }
+    }
+    if ($cur) { [void]$list.Add($cur) }
+    [object[]]$pkgs = @($list)
+    if ($pkgs.Count -eq 0) { throw "dism.exe ran but no packages could be read from its output." }
+  }
+
+  $result = [pscustomobject]@{
+    IsoPath      = $IsoPath
+    Index        = $Index
+    ImageName    = [string]$info.ImageName
+    EditionId    = [string]$info.EditionId
+    Architecture = [string]$info.Architecture
+    Version      = [string]$info.Version
+    SPBuild      = [string]$info.SPBuild
+    Languages    = ((@($info.Languages) | Sort-Object) -join ',')
+    Method       = $method
+    Packages     = [object[]]@($pkgs | Sort-Object DisplayName)
+  }
+  $tmp = "$ResultPath.tmp"
+  [System.IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $result -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+  Move-Item -LiteralPath $tmp -Destination $ResultPath -Force
+  Write-ScanLog 'LISTDONE' ("{0} packages via {1}" -f $pkgs.Count, $method)
+} catch {
+  Write-ScanLog 'ERROR' ("{0}|{1}|0x{2:X8}|{3}" -f $step, ($_.Exception.Message -replace '[\r\n|]+', ' '), $_.Exception.HResult, $_.FullyQualifiedErrorId)
+} finally {
+  if ($wimMounted) {
+    Write-ScanLog 'STEP' 'Dismounting the image'
+    try { Dismount-WindowsImage -Path $mountDir -Discard -ErrorAction Stop | Out-Null }
+    catch { Write-ScanLog 'WARN' ("Dismount failed: {0} - folder {1} left in place" -f $_.Exception.Message, $mountDir) }
+  }
+  # Non-recursive on purpose: if the dismount failed, the folder still holds
+  # the mounted image and must not be deleted.
+  if ($mountDir) { try { [System.IO.Directory]::Delete($mountDir) } catch {} }
+  if ($weMountedIso) {
+    Write-ScanLog 'STEP' 'Dismounting the ISO'
+    try { Dismount-DiskImage -ImagePath $IsoPath | Out-Null } catch {}
+  }
+  Write-ScanLog 'DONE' ''
+  try { [System.IO.File]::Delete($LockPath) } catch {}
+}
+'@
+
+$Script:AppScan         = $null   # running scan: @{ Proc; LogPath; ResultPath; ... ListDone }
+$Script:AppScanLockPath = Join-Path $env:TEMP 'WimWizard-AppScan.lock'
+
+# Last line of a given kind from the scan log, split into fields.
+function Get-AppScanLogLines {
+  param([string]$Path)
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @() }
+  try { return @([System.IO.File]::ReadAllLines($Path)) } catch { return @() }   # file may be mid-write
+}
+
+function Start-AppScan {
+  if ($Script:AppScan -or $Script:ProbeJob) { return }
+  if ($ChkPatchMode -and $ChkPatchMode.Checked) { return }
+  if (-not $Script:IsElevated) {
+    [System.Windows.Forms.MessageBox]::Show("Scanning mounts the image and requires Administrator rights.", "Build application list", "OK", "Warning") | Out-Null
+    return
+  }
+  $d = Get-SelectedImageDetails
+  if (-not $d) { return }
+  if (-not $d.IsoPath -or -not (Test-Path -LiteralPath $d.IsoPath)) {
+    [System.Windows.Forms.MessageBox]::Show("Windows ISO not found:`n$($d.IsoPath)`n`nClick Refresh on the Options tab and try again.", "Build application list", "OK", "Warning") | Out-Null
+    return
+  }
+
+  $id         = [guid]::NewGuid().ToString('N').Substring(0, 8)
+  $scriptPath = Join-Path $env:TEMP 'WimWizard-AppScan.ps1'
+  $logPath    = Join-Path $env:TEMP "WimWizard-AppScan-$id.log"
+  $resultPath = Join-Path $env:TEMP "WimWizard-AppScan-$id.json"
+  try {
+    [System.IO.File]::WriteAllText($scriptPath, $Script:AppScanScript, (New-Object System.Text.UTF8Encoding($true)))
+  } catch {
+    [System.Windows.Forms.MessageBox]::Show("Could not write the scan script to:`n$scriptPath`n`n$($_.Exception.Message)", "Build application list", "OK", "Error") | Out-Null
+    return
+  }
+
+  # Same Windows PowerShell the builds use; Sysnative if this GUI is ever run
+  # from a 32-bit host on 64-bit Windows (System32 would be redirected).
+  $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (-not [Environment]::Is64BitProcess -and [Environment]::Is64BitOperatingSystem) {
+    $psExe = Join-Path $env:SystemRoot 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+  }
+  $argFmt  = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -File "{0}" -IsoPath "{1}" -Index {2} -MountRoot "{3}" -LogPath "{4}" -ResultPath "{5}" -LockPath "{6}"'
+  $argLine = $argFmt -f $scriptPath, $d.IsoPath, $d.Index, $env:TEMP, $logPath, $resultPath, $Script:AppScanLockPath
+  try {
+    $proc = Start-Process -FilePath $psExe -ArgumentList $argLine -WindowStyle Hidden -PassThru -ErrorAction Stop
+    $null = $proc.Handle   # keeps the handle open so ExitCode is still readable after exit
+  } catch {
+    [System.Windows.Forms.MessageBox]::Show("Could not start the scan process:`n$($_.Exception.Message)", "Build application list", "OK", "Error") | Out-Null
+    return
+  }
+
+  $Script:AppScan = @{
+    Proc        = $proc
+    LogPath     = $logPath
+    ResultPath  = $resultPath
+    ImageName   = "$($d.ImageName) ($($d.Arch), index $($d.Index))"
+    ExpectedKey = Get-AppxCacheKey $d
+    Started     = Get-Date
+    ListDone    = $false
+    Orphan      = $false
+  }
+  Set-AppScanLock $true
+  $BtnBuildAppList.Text = "Scanning..."   # was left on "Rebuild application list" during a rescan
+  Set-AppListStatus "Scanning $($Script:AppScan.ImageName)... (usually $($Script:AppScanTypicalText))" $ColSubtext
+  Start-AppScanTimer
+}
+
+function Start-AppScanTimer {
+  $t = New-Object System.Windows.Forms.Timer
+  $t.Interval = 1000
+  $t.Add_Tick({
+    param($s, $e)
+    # Stop the timer that fired (see 2.15.1), not whatever is stored in $Script:.
+    $sc = $Script:AppScan
+    if (-not $sc) { $s.Stop(); $s.Dispose(); return }
+
+    if (-not $sc.ListDone -and -not $sc.Orphan -and (Test-Path -LiteralPath $sc.ResultPath)) {
+      Complete-AppScanList
+    }
+    if ($sc.Proc.HasExited) {
+      $s.Stop(); $s.Dispose()
+      Complete-AppScanProcess
+      return
+    }
+    if (-not $sc.ListDone) {
+      $secs = [int]((Get-Date) - $sc.Started).TotalSeconds
+      $lastStep = @(Get-AppScanLogLines $sc.LogPath | Where-Object { $_ -like 'STEP|*' }) | Select-Object -Last 1
+      $stepText = if ($lastStep) { ($lastStep -split '\|', 3)[2] } else { 'Starting' }
+      Set-AppListStatus "Scanning $($sc.ImageName): $stepText... $secs s (usually $($Script:AppScanTypicalText))" $ColSubtext
+    }
+  })
+  $t.Start()
+}
+
+# The package list is available (the process is still dismounting): save it
+# and show it right away. Run and the source/edition controls stay locked
+# until the process exits, because it will still dismount the ISO.
+function Complete-AppScanList {
+  $sc = $Script:AppScan
+  $sc.ListDone = $true
+  try {
+    $r = Get-Content -LiteralPath $sc.ResultPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+  } catch {
+    $sc.ListDone = $false   # leave it to Complete-AppScanProcess to report
+    $sc.ResultError = $_.Exception.Message
+    return
+  }
+  $key   = Get-AppxCacheKey $r
+  $entry = [pscustomobject]@{
+    ImageName    = $r.ImageName
+    EditionId    = $r.EditionId
+    Architecture = $r.Architecture
+    Version      = $r.Version
+    SPBuild      = $r.SPBuild
+    Languages    = $r.Languages
+    Index        = $r.Index
+    SourceIso    = Split-Path -Leaf $r.IsoPath
+    Method       = $r.Method
+    ScannedAt    = Get-Date -Format 'yyyy-MM-dd HH:mm'
+    ScannedOn    = $env:COMPUTERNAME
+    Packages     = @($r.Packages)
+  }
+  $Script:AppxSessionCache[$key] = $entry
+  try {
+    Save-AppxCacheEntry -Key $key -Entry $entry
+  } catch {
+    [System.Windows.Forms.MessageBox]::Show(
+      "The scan worked, but the result could not be saved to:`n$($Script:AppxCachePath)`n`n$($_.Exception.Message)`n`n" +
+      "The list is used for this session only.", "Build application list", "OK", "Warning") | Out-Null
+  }
+  try { Remove-Item -LiteralPath $sc.ResultPath -Force -ErrorAction Stop } catch {}
+  $sc.ListAt = Get-Date
+  $listSecs = [int]($sc.ListAt - $sc.Started).TotalSeconds
+  Write-Host "[INFO] App list scan: $(@($r.Packages).Count) provisioned packages in $($r.ImageName) (index $($r.Index)) via $($r.Method), list ready after $listSecs s" -ForegroundColor Cyan
+  foreach ($w in @(Get-AppScanLogLines $sc.LogPath | Where-Object { $_ -like 'WARN|*' })) {
+    Write-Host "[WARN] App list scan: $(($w -split '\|', 3)[2])" -ForegroundColor Yellow
+  }
+  if ($key -ne $sc.ExpectedKey) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "The scanned image's metadata does not match what the ISO probe reported for the selected edition.`n`n" +
+      "Click Refresh on the Options tab, then check the Applications tab again.", "Build application list", "OK", "Warning") | Out-Null
+  }
+  $Script:AppListKey = $null   # force a rebuild so a rescan of the same image is shown
+  Update-AppListSource
+}
+
+# The process has exited: report a failure if there was no list, and unlock.
+function Complete-AppScanProcess {
+  $sc = $Script:AppScan
+  if (-not $sc.ListDone -and -not $sc.Orphan -and (Test-Path -LiteralPath $sc.ResultPath)) { Complete-AppScanList }
+  $lines = Get-AppScanLogLines $sc.LogPath
+  $Script:AppScan = $null
+  Set-AppScanLock $false
+  # Timings to the console - the log file is deleted on success. Shows how long
+  # each step took and when the controls were unlocked.
+  $elapsed = [int]((Get-Date) - $sc.Started).TotalSeconds
+  Write-Host "[INFO] App list scan: process exited, controls unlocked $elapsed s after start. Steps:" -ForegroundColor Cyan
+  foreach ($l in @($lines | Where-Object { $_ -match '^(STEP|LISTDONE|DONE|WARN|ERROR)\|' })) {
+    $f = $l -split '\|', 3
+    Write-Host ("         {0}  {1,-8} {2}" -f $f[1], $f[0], $f[2]) -ForegroundColor DarkGray
+  }
+
+  if (-not $sc.Orphan -and -not $sc.ListDone) {
+    $err = @($lines | Where-Object { $_ -like 'ERROR|*' }) | Select-Object -Last 1
+    $msg = if ($err) {
+      # ERROR|time|step|message|hresult|errorid
+      $f = $err -split '\|'
+      "Step: $($f[2])`n$($f[3])`n`nHRESULT: $($f[4])`nError ID: $($f[5])"
+    } elseif ($sc.ResultError) {
+      "The result file could not be read: $($sc.ResultError)"
+    } else {
+      "The scan process ended without a result (exit code $($sc.Proc.ExitCode))."
+    }
+    $warns = @($lines | Where-Object { $_ -like 'WARN|*' } | ForEach-Object { ($_ -split '\|', 3)[2] })
+    if ($warns.Count) { $msg += "`n`nWarnings:`n" + ($warns -join "`n") }
+    [System.Windows.Forms.MessageBox]::Show("The application list could not be built.`n`n$msg`n`nLog: $($sc.LogPath)", "Build application list", "OK", "Error") | Out-Null
+  } else {
+    $dismountWarn = @($lines | Where-Object { $_ -like 'WARN|*Dismount failed*' })
+    if ($dismountWarn.Count) {
+      [System.Windows.Forms.MessageBox]::Show("The list was saved, but the image could not be dismounted:`n`n$(($dismountWarn[-1] -split '\|', 3)[2])`n`nLog: $($sc.LogPath)", "Build application list", "OK", "Warning") | Out-Null
+    } elseif (-not $sc.Orphan) {
+      try { Remove-Item -LiteralPath $sc.LogPath -Force -ErrorAction Stop } catch {}
+    }
+  }
+  if ($sc.Orphan) { Start-ISOProbe }   # skipped at startup while the old scan held the ISO
+  Update-AppListSource
+}
+
+# Called at startup: a scan started by an earlier GUI session may still be
+# dismounting in the background. If its process is alive, lock like a running
+# scan (without expecting a result) until it exits.
+function Resume-OrphanAppScan {
+  if (-not (Test-Path -LiteralPath $Script:AppScanLockPath)) { return }
+  $procId = 0
+  try { $procId = [int](Get-Content -LiteralPath $Script:AppScanLockPath -Raw -ErrorAction Stop).Trim() } catch {}
+  $p = if ($procId) { Get-Process -Id $procId -ErrorAction SilentlyContinue } else { $null }
+  if (-not $p -or $p.ProcessName -ne 'powershell') {
+    try { Remove-Item -LiteralPath $Script:AppScanLockPath -Force -ErrorAction Stop } catch {}
+    return
+  }
+  $Script:AppScan = @{
+    Proc = $p; LogPath = $null; ResultPath = $null; ImageName = 'previous scan'
+    ExpectedKey = $null; Started = Get-Date; ListDone = $true; Orphan = $true
+  }
+  Set-AppScanLock $true
+  Start-AppScanTimer
+  Update-AppListSource
+}
+
+Build-AppCheckboxes -Entry $null
+$Script:AppListKey = 'builtin'
+
+$BtnBuildAppList.Add_Click({ if ($Script:BuildAppListEnabled) { Start-AppScan } })
 $BtnCheckAll.Add_Click({
-  foreach ($cb in $AppCheckboxes.Values) { $cb.Checked = $true }
+  foreach ($cb in @($AppCheckboxes.Values)) { if ($cb.Enabled) { $cb.Checked = $true } }
 })
 $BtnUncheckAll.Add_Click({
-  foreach ($cb in $AppCheckboxes.Values) { $cb.Checked = $false }
+  foreach ($cb in @($AppCheckboxes.Values)) { if ($cb.Enabled) { $cb.Checked = $false } }
 })
 $BtnCheckDefault.Add_Click({
-  foreach ($kvp in $AppCheckboxes.GetEnumerator()) {
-    $kvp.Value.Checked = [bool]$AppxData[$kvp.Key].Default
+  foreach ($kvp in @($AppCheckboxes.GetEnumerator())) {
+    if ($kvp.Value.Enabled) { $kvp.Value.Checked = Get-AppDefault $kvp.Key }
   }
 })
 
@@ -2876,7 +3919,7 @@ foreach ($key in $FoDData.Keys) {
 
 # Hide ARM64-unsupported items when ARM64 is selected - called from Update-ArchPanel
 function Update-FoDPanel {
-    $isArm64 = $RadArm64 -and $RadArm64.Checked
+    $isArm64 = (Get-ActiveWimWizardArch) -eq 'arm64'
     foreach ($key in $FoDData.Keys) {
         $data = $FoDData[$key]
         $chk  = $FoDCheckboxes[$key]
@@ -5400,7 +6443,8 @@ $BtnRun.BackColor = [System.Drawing.Color]::Transparent
 $BtnRun.Visible   = $false
 $PanelBottom.Controls.Add($BtnRun)
 
-# Spinner label - shown in place of Run button during ISO probe
+# Spinner label - shown in place of Run button during the ISO probe and an
+# application scan (Set-AppScanLock)
 # Uses braille animation characters - no GDI+/GIF dependencies
 $Script:SpinnerFrames = [char[]]@(0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827, 0x2807, 0x280F)
 $Script:SpinnerIndex  = 0
@@ -5549,8 +6593,8 @@ $PanelComplete.Controls.Add($BtnCompleteOK)
 $Script:SettingsSnapshot = ""
 
 function Get-SettingsSnapshot {
-  $langs = ($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
-  $apps  = ($AppCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
+  $langs = (Get-SavedLanguageSelection) -join ","
+  $apps  = (Get-SelectedAppKeys) -join ","
   $fods  = ($FoDCheckboxes.GetEnumerator()  | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object) -join ","
   $dpGroup = if ($CmbSCCMDPGroup -and $CmbSCCMDPGroup.SelectedItem) { $CmbSCCMDPGroup.SelectedItem.ToString() } else { "<None>" }
   $sccm  = "$($TxtSCCMServer.Text)|$($TxtSCCMSiteCode.Text)|$($TxtSCCMPath.Text)|$($TxtSCCMNameTemplate.Text)|$($TxtSCCMComment.Text)|$([int]$RadSCCMUpdate.Checked)|$($TxtSCCMPackageID.Text)|$([int]$ChkSCCMAutoImport.Checked)|$([int]$ChkSCCMUpdateDPs.Checked)|$dpGroup"
@@ -5563,7 +6607,8 @@ function Get-SettingsSnapshot {
   $driverSel = if ($Script:DriverTable) {
     (@($Script:DriverTable.Select("Include = true")) | ForEach-Object { [string]$_["InfPath"] } | Sort-Object) -join ";"
   } else { "" }
-  return "$langs|$apps|$fods|$($TxtSource.Text)|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkFixInboxAppLang.Checked)|$([int]$ChkSkipDefender.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
+  $winIso = if ($Script:SelectedWinISO) { $Script:SelectedWinISO.Name } else { "" }
+  return "$langs|$apps|$fods|$($TxtSource.Text)|$winIso|$([int]$ChkSkipUpdates.Checked)|$([int]$ChkSkipLPs.Checked)|$([int]$ChkSkipAppx.Checked)|$([int]$ChkFixInboxAppLang.Checked)|$([int]$ChkSkipDefender.Checked)|$($TxtDriverPath.Text)|$driverSel|$sccm"
 }
 
 # -- Build command string -------------------------------------------------------
@@ -5658,7 +6703,7 @@ function Build-CommandString {
     $isEnt   = $selName -match 'Enterprise' -and $selName -notmatch 'Evaluation'
     if (-not $isEnt) { $cmd += " -WimIndex $($Script:EditionIndexMap[$CmbEdition.SelectedIndex])" }
   }
-  if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) {
+  if ((Get-ActiveWimWizardArch) -eq 'arm64') {
     $cmd += " -ARM64"
   }
 
@@ -5694,53 +6739,101 @@ function Build-CommandString {
 
 function Update-AppxSkipState {
   # Called whenever ChkSkipAppx changes to grey/restore application checkboxes.
+  # The real selection stays in $Script:AppChoice: the checkbox handler ignores
+  # changes while ChkSkipAppx is checked, so forcing the boxes off here does
+  # not erase it, and unskipping restores from it (works across list rebuilds).
   if ($ChkSkipAppx.Checked) {
-    $Script:SavedAppxState = @{}
-    foreach ($kvp in $AppCheckboxes.GetEnumerator()) {
-      $Script:SavedAppxState[$kvp.Key] = $kvp.Value.Checked
-      $kvp.Value.Checked   = $false
-      $kvp.Value.Enabled   = $false
-      $kvp.Value.ForeColor = $ColSubtext
+    foreach ($cb in @($AppCheckboxes.Values)) {
+      $cb.Checked   = $false
+      $cb.Enabled   = $false
+      $cb.ForeColor = $ColSubtext
     }
   } else {
-    foreach ($kvp in $AppCheckboxes.GetEnumerator()) {
+    foreach ($kvp in @($AppCheckboxes.GetEnumerator())) {
       $kvp.Value.Enabled   = $true
       $kvp.Value.ForeColor = $ColFg
-      if ($Script:SavedAppxState -and $Script:SavedAppxState.ContainsKey($kvp.Key)) {
-        $kvp.Value.Checked = $Script:SavedAppxState[$kvp.Key]
-      }
+      $kvp.Value.Checked   = [bool]$Script:AppChoice[$kvp.Key]
     }
-    $Script:SavedAppxState = @{}
   }
 }
 
 function Update-LangSkipState {
-  # Called whenever ChkSkipLPs changes to grey/restore language checkboxes.
-  if ($ChkSkipLPs.Checked) {
-    # Save current checked state, then uncheck and disable all language boxes
-    $Script:SavedLangState = @{}
-    foreach ($kvp in $LangCheckboxes.GetEnumerator()) {
-      $Script:SavedLangState[$kvp.Key] = $kvp.Value.Checked
-      $kvp.Value.Checked   = $false
-      $kvp.Value.Enabled   = $false
-      $kvp.Value.ForeColor = $ColSubtext
-    }
-  } else {
-    # Restore saved state (from registry-load or last user selection)
-    foreach ($kvp in $LangCheckboxes.GetEnumerator()) {
-      $kvp.Value.Enabled   = $true
-      $kvp.Value.ForeColor = $ColFg
-      if ($Script:SavedLangState.ContainsKey($kvp.Key)) {
-        $kvp.Value.Checked = $Script:SavedLangState[$kvp.Key]
+  # Greys/restores the language checkboxes. Locked when "Skip language packs"
+  # is checked or when no Language Pack ISO for the active architecture was
+  # found ($Script:LPISOFound, set by Update-ISOStatus via Set-LPISOFound).
+  #
+  # Idempotent (2.16.7): it is now also called whenever the LP ISO status
+  # changes, so it can run while already locked. The first lock saves the
+  # state; later calls only merge in boxes checked since then (e.g. by
+  # Load-Settings at startup), so the saved selection is never overwritten
+  # with the all-unchecked locked state.
+  $lpMissing = $Script:LPISOFound -eq $false   # $null = not determined yet
+  $lock      = $ChkSkipLPs.Checked -or $lpMissing
+  $Script:LangStateUpdating = $true
+  try {
+    if ($lock) {
+      foreach ($kvp in $LangCheckboxes.GetEnumerator()) {
+        if (-not $Script:LangLocked)  { $Script:SavedLangState[$kvp.Key] = $kvp.Value.Checked }
+        elseif ($kvp.Value.Checked)   { $Script:SavedLangState[$kvp.Key] = $true }
+        $kvp.Value.Checked   = $false
+        $kvp.Value.Enabled   = $false
+        $kvp.Value.ForeColor = $ColSubtext
       }
+      $Script:LangLocked = $true
+    } else {
+      foreach ($kvp in $LangCheckboxes.GetEnumerator()) {
+        $kvp.Value.Enabled   = $true
+        $kvp.Value.ForeColor = $ColFg
+        if ($Script:LangLocked -and $Script:SavedLangState.ContainsKey($kvp.Key)) {
+          $kvp.Value.Checked = $Script:SavedLangState[$kvp.Key]
+        }
+      }
+      $Script:SavedLangState = @{}
+      $Script:LangLocked     = $false
     }
-    $Script:SavedLangState = @{}
+  } finally { $Script:LangStateUpdating = $false }
+
+  $LblLangHint.Text = if ($lpMissing -and -not $ChkSkipLPs.Checked) {
+    "Language packs can only be selected with a language pack ISO in the Source Folder."
+  } else {
+    "Select language packs to inject into the WIM. Previous selections are restored automatically."
   }
   # The inbox app language fix is a no-op with no language pack applied - disable
   # it for the same reason (WimWizard.ps1 already skips it independently via its
   # own -not $SkipLanguagePacks check, this is purely a UI cue). Its own checked
   # state is left untouched since it doesn't matter while disabled.
-  $ChkFixInboxAppLang.Enabled = -not $ChkSkipLPs.Checked
+  $ChkFixInboxAppLang.Enabled = -not $lock
+}
+
+# Language selection as the user made it, also while the boxes are locked
+# (they are unchecked then and the real choice is in $Script:SavedLangState).
+# Used for saving settings, so a missing LP ISO or Skip language packs no
+# longer wipes the saved languages.
+function Get-SavedLanguageSelection {
+  if ($Script:LangLocked) {
+    return @($Script:SavedLangState.GetEnumerator() | Where-Object { $_.Value } | ForEach-Object { $_.Key } | Sort-Object)
+  }
+  return @($LangCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key } | Sort-Object)
+}
+
+# Called by Update-ISOStatus with the LP ISO result. Re-evaluates the
+# Languages tab only when the result changes, then refreshes the UI once
+# from a one-shot timer: Update-ISOStatus runs inside Update-UI, whose
+# command preview was already built with the old language selection.
+function Set-LPISOFound {
+  param([bool]$Found)
+  if ($Script:LPISOFound -eq $Found) { return }
+  $Script:LPISOFound = $Found
+  # Not before startup has loaded the saved languages: Load-Settings fires
+  # Update-UI per checkbox, and locking mid-load would save a half-loaded
+  # selection. The form's Shown handler sets LangLockReady and applies it.
+  if (-not $Script:LangLockReady) { return }
+  if (-not $LangCheckboxes -or -not $LblLangHint) { return }
+  Update-LangSkipState
+  $t = New-Object System.Windows.Forms.Timer
+  $t.Interval = 50
+  $t.Add_Tick({ param($s, $e) $s.Stop(); $s.Dispose(); Update-UI })
+  $t.Start()
 }
 
 function Get-FreeSpaceGB {
@@ -5914,7 +7007,8 @@ function Update-UI {
 
 # -- Wire up change events ------------------------------------------------------
 foreach ($cb in $LangCheckboxes.Values) {
-  $cb.Add_CheckedChanged({ Update-UI })
+  # Update-LangSkipState changes every box; one Update-UI afterwards is enough.
+  $cb.Add_CheckedChanged({ if (-not $Script:LangStateUpdating) { Update-UI } })
 }
 foreach ($cb in $FoDCheckboxes.Values) {
   $cb.Add_CheckedChanged({ Update-UI })
@@ -6363,19 +7457,25 @@ $Script:RunClick = {
 
   # ---- NORMAL BUILD MODE ----
 
-  # Warn if LP ISO is missing
-  if ($Script:IndLP.ForeColor.R -eq 220) {
+  # Warn if the LP ISO is missing - only when the selection needs it (the
+  # indicator alone was red whenever "Skip language packs" was unchecked, so
+  # this asked even with no languages and no FoDs selected).
+  # Both prompts reset the Run button when the user backs out; before 2.16.5
+  # they returned with it stuck on "Running...".
+  if ((Test-LPISONeeded) -and $Script:IndLP.ForeColor.R -eq 220) {
     $r = [System.Windows.Forms.MessageBox]::Show(
-      "Language Pack ISO not found in:`n$($TxtSource.Text.Trim())`n`nSee the Help tab for download links.`n`nContinue anyway?",
+      "Language Pack ISO not found in:`n$($TxtSource.Text.Trim())`n`n" +
+      "It is needed for the selected languages or Features on Demand.`n" +
+      "See the Help tab for download links.`n`nContinue anyway?",
       "Missing Language Pack ISO", "YesNo", "Warning")
-    if ($r -ne "Yes") { $Tabs.SelectedTab = $TabOpts; return }
+    if ($r -ne "Yes") { $Tabs.SelectedTab = $TabOpts; & $resetRunButton; return }
   }
 
   if ($data.SelectedCodes.Count -eq 0 -and -not $ChkSkipLPs.Checked) {
     $r = [System.Windows.Forms.MessageBox]::Show(
       "No languages selected.`n`nThe WIM will be English-only. Continue?",
       "No languages selected", "YesNo", "Warning")
-    if ($r -ne "Yes") { return }
+    if ($r -ne "Yes") { & $resetRunButton; return }
   }
 
   $argList = @()
@@ -6411,7 +7511,9 @@ $Script:RunClick = {
   $argList += "-OutputPath `"$out`""
 
   # Export Appx removal list to XML so WimWizard.ps1 can consume it via -AppxListPath
-  $checkedPkgs = @($AppCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked } | ForEach-Object { $_.Key })
+  # Only what is shown and enabled: with a scanned list, choices for apps that
+  # are not in this image are kept in $Script:AppChoice but not exported.
+  $checkedPkgs = @($AppCheckboxes.GetEnumerator() | Where-Object { $_.Value.Checked -and $_.Value.Enabled } | ForEach-Object { $_.Key })
   $AppxXmlPath = Join-Path $ScriptRoot "WimWizard-AppxList.xml"
   $xml  = [System.Xml.XmlDocument]::new()
   $dec  = $xml.CreateXmlDeclaration("1.0", "UTF-8", $null)
@@ -6420,11 +7522,14 @@ $Script:RunClick = {
   $root.SetAttribute("GeneratedBy", "WimWizard-GUI")
   $root.SetAttribute("Date", (Get-Date -Format "yyyy-MM-dd HH:mm"))
   $root.SetAttribute("Count", $checkedPkgs.Count)
+  $listSource = if ($Script:AppListKey -and $Script:AppListKey -ne 'builtin') { 'ImageScan' } else { 'BuiltIn' }
+  $root.SetAttribute("ListSource", $listSource)
+  if ($listSource -eq 'ImageScan') { $root.SetAttribute("ImageKey", $Script:AppListKey) }
   $xml.AppendChild($root) | Out-Null
   foreach ($pkg in $checkedPkgs) {
     $node = $xml.CreateElement("Package")
     $node.SetAttribute("Id", $pkg)
-    $node.SetAttribute("Name", $AppxData[$pkg].Name)
+    $node.SetAttribute("Name", $AppCheckboxes[$pkg].Text)
     $root.AppendChild($node) | Out-Null
   }
   $xml.Save($AppxXmlPath)
@@ -6509,7 +7614,7 @@ $Script:RunClick = {
   $launcherDir  = "$env:ProgramData\WimWizard"
   if (-not (Test-Path $launcherDir)) { New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null }
   $launcherPath = Join-Path $launcherDir "WimWizard_Launch.ps1"
-  $archSuffix = if ($Script:HasX64 -and $Script:HasArm64 -and $RadArm64 -and $RadArm64.Checked) { " -ARM64" } else { "" }
+  $archSuffix = if ((Get-ActiveWimWizardArch) -eq 'arm64') { " -ARM64" } else { "" }
   $Script:ConsoleLogPath = Write-WimWizardLauncher -LauncherPath $launcherPath -EngineArgs "$argStr$archSuffix"
 
   $Script:OutFile      = [System.IO.Path]::GetFileName($out)
@@ -6610,6 +7715,15 @@ $LblRunText.Add_Click($Script:RunClick)
 $Form.Add_FormClosing({
   param($s, $e)
   if ($PanelComplete.Visible) { $PanelComplete.Visible = $false; $PanelBottom.Visible = $true; return }
+  # The scan is a separate process: it finishes and dismounts on its own if
+  # the GUI closes. Only a scan that has not delivered its list yet is worth
+  # asking about, because that result would be lost.
+  if ($Script:AppScan -and -not $Script:AppScan.ListDone -and -not $Script:AppScan.Orphan) {
+    $r = [System.Windows.Forms.MessageBox]::Show(
+      "An application scan is still running.`n`nIt will finish and dismount the image by itself, but its result is not " +
+      "saved if you close now.`n`nClose anyway?", 'Scan in progress', 'YesNo', 'Warning')
+    if ($r -ne 'Yes') { $e.Cancel = $true; return }
+  }
   # Only ask if something changed since last save
   if ((Get-SettingsSnapshot) -ne $Script:SettingsSnapshot) {
     $r = [System.Windows.Forms.MessageBox]::Show(
@@ -6638,6 +7752,10 @@ $Form.Add_Shown({
       "Not Running as Administrator", "OK", "Warning") | Out-Null
   }
 
+  # A scan from an earlier session may still be dismounting in the background;
+  # lock first so the probe that Load-Settings triggers waits for it.
+  Resume-OrphanAppScan
+
   # Load saved registry settings
   Load-Settings
   # Driver selection restore is deferred to the first time the Drivers tab
@@ -6645,7 +7763,9 @@ $Form.Add_Shown({
   # it's a real folder scan that could be slow against a large/UNC share,
   # and doing it unconditionally at startup delayed the window becoming
   # interactive even for users who never touch that tab this session.
-  # Apply Skip Languages visual state if it was saved as checked
+  # Apply the language lock (Skip language packs saved as checked, or no LP
+  # ISO in the source folder) now that the saved languages are loaded.
+  $Script:LangLockReady = $true
   Update-LangSkipState
   Update-AppxSkipState
   Update-UI
