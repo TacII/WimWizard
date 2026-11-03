@@ -6,7 +6,7 @@ A graphical launcher (`WimWizard-GUI.ps1`) provides a clean interface for config
 
 Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 
-<img width="764" height="659" alt="image" src="https://github.com/user-attachments/assets/1c2f43b6-1b18-4720-a4d5-2a082db6439b" />
+<img width="765" height="660" alt="image" src="https://github.com/user-attachments/assets/a3dfa6d5-7679-4a2a-9021-c4cc86474a10" />
 
 ## Features
 
@@ -30,7 +30,8 @@ Inspired by [WIM Witch](https://msendpointmgr.com/wim-witch/) by Donna Ryan.
 - **ISO version probe** — GUI reads the Windows ISO at startup (from filename or by mounting) to display the real build number in the filename preview
 - **26H2 support** - Wim Wizard supports Windows 26H2, tested! 
 - **Driver injection** - GUI lets you browse and select drivers to inject into your ISO. Folders can be selected with parameter as well.
-- **Defender update** - Wim Wizard automatically downnloads and updates Windows Defender to the latest version. 
+- **Defender update** - Wim Wizard automatically downnloads and updates Windows Defender to the latest version.
+- **Reads built in apps from ISO** Automatically reads built in applications from ISO so that they can be removed or left in the image
 ---
 
 ## Requirements
@@ -192,8 +193,8 @@ Update download time varies. Already-downloaded KBs are reused from the `Updates
 
 | Component         | Version                         |
 | ----------------- | -------------------------------- |
-| WimWizard.ps1     | 5.7.3                            |
-| WimWizard-GUI.ps1 | 2.15.1                            |
+| WimWizard.ps1     | 5.8.1                            |
+| WimWizard-GUI.ps1 | 2.17.2                            |
 | Windows 11 target | 26H2 (26200.x)                 |
 
 ---
